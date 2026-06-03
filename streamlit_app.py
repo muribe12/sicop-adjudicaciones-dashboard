@@ -130,14 +130,13 @@ inst_label = sel_inst.split(" (")[0]
 tables = load_tables(cedula)
 enriched, op_con, op_raw = prepare_data(tables)
 
-# date filter
+# year filter
 valid_dates = enriched["fecha_adj"].dropna()
 if len(valid_dates):
-    d_min, d_max = valid_dates.min().date(), valid_dates.max().date()
-    date_range = st.sidebar.date_input("Fecha adjudicación firme", (d_min, d_max),
-                                       min_value=d_min, max_value=d_max)
+    all_years = sorted(valid_dates.dt.year.unique())
+    sel_years = st.sidebar.multiselect("Año(s)", all_years, default=all_years)
 else:
-    date_range = None
+    sel_years = []
 
 # tipo procedimiento
 tipos = sorted(enriched["tipo procedimiento"].dropna().unique())
@@ -158,9 +157,8 @@ estado_opt = st.sidebar.radio("Estado", ["Todos", "Solo adjudicados", "Solo desi
 # ── apply filters ──
 df = enriched.copy()
 
-if date_range and len(date_range) == 2:
-    lo, hi = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
-    df = df[df["fecha_adj"].between(lo, hi) | df["fecha_adj"].isna()]
+if sel_years:
+    df = df[df["fecha_adj"].dt.year.isin(sel_years) | df["fecha_adj"].isna()]
 
 df = df[df["tipo procedimiento"].isin(sel_tipos) | df["tipo procedimiento"].isna()]
 
