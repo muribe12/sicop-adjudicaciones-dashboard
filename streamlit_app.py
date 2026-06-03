@@ -18,6 +18,130 @@ st.set_page_config(
 
 DATA_DIR = Path(__file__).parent / "data"
 
+# ── product category mapping ─────────────────────────────────────────────────
+
+import re
+
+CATEGORY_RULES = [
+    ("Infraestructura y Construcción", [
+        r"construcci[oó]n", r"acera", r"paviment", r"asfalt", r"muro\b", r"puente",
+        r"alcantarill", r"obra[s]?\b", r"cimenta", r"demolici", r"remodelaci",
+        r"reparaci[oó]n.*(edifici|inmueble|infraestructur)", r"techado", r"cubierta.*techo",
+        r"nave industrial", r"dise[ñn]o.*plano", r"topograf",
+        r"acondicionamiento.*sal[oó]n", r"mejora.*parque", r"gavion",
+        r"instalaci[oó]n.*(red|el[eé]ctric|mec[aá]nic)", r"soldadura",
+    ]),
+    ("Tecnología e Informática", [
+        r"comput", r"servidor", r"laptop", r"notebook", r"portatil|portátil",
+        r"software", r"licencia.*software", r"sistema.*inform",
+        r"switch", r"router", r"firewall", r"ups\b", r"rack\b",
+        r"imac\b", r"macbook", r"ipad\b", r"monitor\b",
+        r"impresora", r"plotter", r"disco.*duro", r"webcam", r"web\s*cam",
+        r"microsoft|office\s*365|sql.server", r"nube|cloud",
+        r"red.*datos|fibra.*[oó]ptica|cableado.*estructurado",
+        r"cibersegur|antivirus|fortinet|forti\w+", r"backup|respaldo.*autom",
+        r"docking\b", r"arcgis|autocad|cad\b|zwcad", r"adobe",
+        r"milestone|alarm\s*center", r"blip\b", r"elisiam",
+        r"hosting|hospedaje.*nube", r"dominio.*web",
+        r"firma.*digital", r"punto.*acceso.*inal[aá]mbric",
+        r"tel[eé]fono.*ip|tel[eé]fono.*celular|iphone",
+    ]),
+    ("Vehículos y Transporte", [
+        r"veh[ií]culo", r"cami[oó]n", r"automóvil|autom[oó]vil",
+        r"motocicleta", r"flotilla", r"arrendamiento.*veh",
+        r"gr[uú]a\b", r"remolque", r"llanta", r"neum[aá]tico",
+        r"combustible|gasolina|di[eé]sel", r"lubricant",
+        r"taller.*mec[aá]nic|mec[aá]nica.*automotriz",
+        r"repuesto.*vehic", r"alquiler.*cami[oó]n",
+    ]),
+    ("Seguridad y Vigilancia", [
+        r"seguridad", r"vigilancia", r"alarma", r"c[aá]mara.*seguridad",
+        r"monitoreo|cctv", r"arma.*fuego|munici[oó]n",
+        r"polic[ií]a", r"chaleco.*antibal", r"detector",
+        r"control.*acceso", r"barrera.*autom",
+    ]),
+    ("Servicios Profesionales", [
+        r"consultor[ií]a", r"asesor[ií]a", r"servicios.*profesionales",
+        r"abogad[oa]|legal|jur[ií]dic", r"auditor[ií]a",
+        r"contab|nicsp", r"notari", r"peritaje",
+        r"estudio.*t[eé]cnico|estudio.*factibilidad",
+        r"dise[ñn]o.*arquitect", r"arquitect",
+        r"ingenier[ií]a.*civil|ingenier[ií]a.*el[eé]ctric",
+        r"plan.*regulador|plan.*desarrollo",
+    ]),
+    ("Mantenimiento y Reparación", [
+        r"mantenimiento", r"reparaci[oó]n", r"correctivo|preventivo",
+        r"limpieza", r"fumigaci|plaga|desinfec",
+        r"pintura.*edifici|pintura.*inmueble", r"fontaner",
+        r"aire.*acondicionado.*manten", r"ascensor",
+        r"jardin|chapea|poda|[aá]reas.*verdes",
+    ]),
+    ("Materiales y Suministros", [
+        r"papel\b|papel.*bond", r"tinta\b|t[oó]ner", r"cartucho",
+        r"material.*oficina", r"suministro", r"tuber[ií]a",
+        r"pintura\b", r"cemento|concreto|bloques",
+        r"herramienta", r"ferret", r"tornillo|clavo|tuerca",
+        r"uniforme|indumentaria|vestuario|camisa",
+        r"recipiente|basurer|contenedor",
+        r"se[ñn]al[ée]tica|r[oó]tulo", r"letras.*volum[eé]tric",
+    ]),
+    ("Salud y Bienestar Social", [
+        r"salud", r"m[eé]dic[oa]", r"hospital", r"cl[ií]nica",
+        r"psicol[oó]g", r"rehabilitaci", r"discapacidad",
+        r"esterilizaci[oó]n|castraci[oó]n", r"vacun",
+        r"adulto.*mayor", r"ni[ñn]ez|cecudi",
+        r"social\b|bienestar|vulnerab",
+        r"mascarilla|equipo.*protecci[oó]n.*personal",
+    ]),
+    ("Capacitación y Eventos", [
+        r"capacitaci[oó]n", r"taller\b", r"curso\b", r"congreso",
+        r"seminario", r"charla\b", r"formaci[oó]n",
+        r"evento|festival|feria\b|foro\b",
+        r"alquiler.*hotel|alquiler.*instalacion|alquiler.*sal[oó]n",
+        r"team.building|log[ií]stica.*evento",
+        r"patrocin", r"rendici[oó]n.*cuentas",
+    ]),
+    ("Comunicación y Publicidad", [
+        r"publicidad|public.*medios", r"campa[ñn]a.*divulgaci",
+        r"medios.*comunicaci[oó]n", r"televisi[oó]n|tv\b|canal\b",
+        r"radio\b|prensa\b|peri[oó]dico",
+        r"dise[ñn]o.*gr[aá]fico|impresi[oó]n.*material",
+        r"redes.*sociales", r"comunicaci[oó]n.*institucional",
+        r"correo.*masivo",
+    ]),
+    ("Alquiler de Maquinaria y Equipos", [
+        r"alquiler.*maquinaria", r"alquiler.*equipo",
+        r"retroexcavadora|excavadora|compactador",
+        r"hidrovaciador|tragante|pozo",
+        r"arrendamiento.*impresora|arrendamiento.*comput",
+        r"arrendamiento.*radio",
+        r"caba[ñn]a.*sanitaria",
+    ]),
+    ("Alimentación", [
+        r"aliment", r"comida\b", r"bebida", r"almuerzo",
+        r"desayuno", r"catering|servicio.*comedor",
+        r"jugo|quequit|refrescos", r"percolador|caf[eé]\b",
+    ]),
+    ("Medio Ambiente y Residuos", [
+        r"residuo|desecho|reciclaje|reciclado",
+        r"ambiente|ambiental|ecol[oó]g",
+        r"reforestaci|pl[aá]ntula|vivero|[aá]rbol",
+        r"agua.*potable|acueducto",
+        r"contaminaci|emisiones",
+        r"manejo.*residuo",
+    ]),
+]
+
+def categorize_description(desc: str) -> str:
+    if not desc or not isinstance(desc, str):
+        return "Sin categoría"
+    text = desc.lower().replace("\xa0", " ")
+    for category, patterns in CATEGORY_RULES:
+        for pat in patterns:
+            if re.search(pat, text):
+                return category
+    return "Otros"
+
 INSTITUTIONS = {
     "Municipalidad de San José (3014042058)": "3014042058",
     "Municipalidad de Montes de Oca (3014042053)": "3014042053",
@@ -83,10 +207,11 @@ def prepare_data(tables: dict[str, pd.DataFrame]):
     )
 
     # ── 3. description + tipo from detalle_pliego ──
+    dp["categoría"] = dp["descripción"].apply(categorize_description)
     dp_uniq = (
         dp.sort_values("número procedimiento")
         .drop_duplicates(subset="número procedimiento")
-        [["número procedimiento", "descripción", "tipo procedimiento",
+        [["número procedimiento", "descripción", "categoría", "tipo procedimiento",
           "modalidad procedimiento", "nombre unidad compra"]]
         .rename(columns={"número procedimiento": "_proc"})
     )
@@ -151,6 +276,11 @@ all_proveedores = sorted(
 sel_proveedores = st.sidebar.multiselect("Proveedor(es)", all_proveedores,
                                           placeholder="Todos")
 
+# categoría filter
+categorias = sorted(enriched["categoría"].dropna().unique())
+sel_categorias = st.sidebar.multiselect("Categoría de Producto", categorias,
+                                         default=categorias)
+
 # desierto
 estado_opt = st.sidebar.radio("Estado", ["Todos", "Solo adjudicados", "Solo desiertos"])
 
@@ -167,6 +297,8 @@ if sel_proveedores:
         lambda p: any(s.strip() in p for s in sel_proveedores)
     )
     df = df[mask]
+
+df = df[df["categoría"].isin(sel_categorias) | df["categoría"].isna()]
 
 if estado_opt == "Solo adjudicados":
     df = df[df["desierto"].str.upper() == "N"]
@@ -281,12 +413,12 @@ proc_summary = proc_dedup.copy()
 top50 = proc_summary[proc_summary["monto_total_crc"] > 0].head(50)
 
 top50_disp = top50[[
-    "número de procedimiento", "descripción", "proveedores",
+    "número de procedimiento", "descripción", "categoría", "proveedores",
     "monto_total_crc", "tipo procedimiento", "modalidad procedimiento",
     "fecha_adj", "n_contratos",
 ]].copy()
 top50_disp.columns = [
-    "Procedimiento", "Descripción", "Proveedor(es)",
+    "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
     "Monto (₡)", "Tipo", "Modalidad",
     "Fecha Adj. Firme", "Contratos",
 ]
@@ -382,6 +514,44 @@ with col_mod:
     mod_tbl.columns = ["Modalidad", "Monto (₡)", "Cantidad"]
     mod_tbl["Monto (₡)"] = mod_tbl["Monto (₡)"].apply(fmt_crc)
     st.dataframe(mod_tbl, width="stretch", hide_index=True)
+
+st.markdown("---")
+
+# ── by category ──
+st.subheader("🏷️ Distribución por Categoría de Producto")
+col_cat_chart, col_cat_table = st.columns([3, 2])
+
+with col_cat_chart:
+    cat_data = (
+        proc_summary.groupby("categoría")
+        .agg(monto=("monto_total_crc", "sum"), n=("monto_total_crc", "count"))
+        .reset_index()
+        .sort_values("monto", ascending=False)
+    )
+    fig_cat = px.bar(
+        cat_data, y="categoría", x="monto", orientation="h",
+        title="Monto por Categoría de Producto",
+        labels={"monto": "Monto (₡)", "categoría": ""},
+        color="monto", color_continuous_scale="Viridis",
+    )
+    fig_cat.update_layout(
+        yaxis={"categoryorder": "total ascending"},
+        height=max(400, len(cat_data) * 35),
+        coloraxis_showscale=False,
+    )
+    st.plotly_chart(fig_cat, use_container_width=True)
+
+with col_cat_table:
+    cat_tbl = cat_data.copy()
+    cat_tbl["pct"] = (cat_tbl["monto"] / cat_tbl["monto"].sum() * 100).round(1)
+    cat_tbl.columns = ["Categoría", "Monto (₡)", "Procedimientos", "% del Total"]
+    cat_tbl["Monto (₡)"] = cat_tbl["Monto (₡)"].apply(fmt_crc)
+    cat_tbl.index = range(1, len(cat_tbl) + 1)
+    st.dataframe(cat_tbl, width="stretch", hide_index=True)
+
+    csv_cat = cat_data.to_csv(index=False).encode("utf-8")
+    st.download_button("📥 Descargar categorías (CSV)", csv_cat,
+                       "categorias_producto.csv", "text/csv")
 
 st.markdown("---")
 
@@ -531,12 +701,12 @@ st.markdown("---")
 st.subheader("📑 Detalle Completo")
 
 detail = proc_summary[[
-    "número de procedimiento", "descripción", "proveedores",
+    "número de procedimiento", "descripción", "categoría", "proveedores",
     "monto_total_crc", "tipo procedimiento", "modalidad procedimiento",
     "fecha_adj", "desierto", "permite recursos", "n_contratos",
 ]].copy()
 detail.columns = [
-    "Procedimiento", "Descripción", "Proveedor(es)",
+    "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
     "Monto (₡)", "Tipo", "Modalidad",
     "Fecha Adj. Firme", "Desierto", "Recursos", "Contratos",
 ]
