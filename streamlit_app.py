@@ -353,53 +353,118 @@ vista = st.sidebar.radio("📊 Vista", ["Adjudicaciones", "Análisis de Oferente
 def fmt_crc(v):
     return f"₡{v:,.0f}" if pd.notna(v) and v != 0 else "—"
 
+# ── common data prep (shared across tabs) ─────────────────────────────────────
+
+proc_dedup = df.drop_duplicates(subset="número de procedimiento")
+n_procs    = len(proc_dedup)
+total_monto = proc_dedup["monto_total_crc"].sum()
+with_monto  = (proc_dedup["monto_total_crc"] > 0).sum()
+avg_monto   = proc_dedup.loc[proc_dedup["monto_total_crc"] > 0, "monto_total_crc"].mean() if with_monto else 0
+n_prov      = (proc_dedup["proveedores"].dropna()
+               .str.split(r"\s*\|\s*").explode().nunique())
+n_desierto  = (proc_dedup["desierto"].str.strip().str.upper() == "S").sum()
+proc_summary = proc_dedup.copy()
+
+prov_rank = (
+    op_filtered
+    .groupby(["cédula proveedor", "nombre proveedor", "tipo proveedor",
+              "tamaño proveedor", "provincia"])
+    .agg(monto_total=("monto_crc", "sum"), ordenes=("monto_crc", "count"))
+    .reset_index()
+    .sort_values("monto_total", ascending=False)
+)
+prov_rank = prov_rank[prov_rank["monto_total"] > 0]
+prov_rank["nombre proveedor"] = prov_rank["nombre proveedor"].fillna(
+    prov_rank["cédula proveedor"]
+)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
-# VIEW: ADJUDICACIONES
+# TABS
 # ══════════════════════════════════════════════════════════════════════════════
 
-if vista == "Adjudicaciones":
+st.title(f"📊 Adjudicaciones SICOP — {inst_label}")
+st.caption(f"**{n_procs:,}** procedimientos · {len(df):,} registros de adjudicación")
 
-    # ── header ────────────────────────────────────────────────────────────────
+tab_home, tab_gasto, tab_anomalias, tab_oferentes = st.tabs(
+    ["🏠 Inicio", "💰 Gasto", "🚨 Anomalías", "🔎 Oferentes"]
+)
 
-    st.title(f"📊 Adjudicaciones — {inst_label}")
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: INICIO (Landing Page)
+# ══════════════════════════════════════════════════════════════════════════════
 
-    # deduplicate by procedure for counts
-    proc_dedup = df.drop_duplicates(subset="número de procedimiento")
-    n_procs    = len(proc_dedup)
-    total_monto = proc_dedup["monto_total_crc"].sum()
-    with_monto  = (proc_dedup["monto_total_crc"] > 0).sum()
-    avg_monto   = proc_dedup.loc[proc_dedup["monto_total_crc"] > 0, "monto_total_crc"].mean() if with_monto else 0
-    n_prov      = (proc_dedup["proveedores"].dropna()
-                   .str.split(r"\s*\|\s*").explode().nunique())
-    n_desierto  = (proc_dedup["desierto"].str.strip().str.upper() == "S").sum()
+with tab_home:
+    st.header("Bienvenido al Dashboard de Adjudicaciones SICOP")
+    st.markdown(f"""
+    Este dashboard permite analizar los procesos de adjudicación pública de
+    **{inst_label}** registrados en el sistema SICOP (Sistema Integrado de
+    Compras Públicas) de Costa Rica.
 
-    st.caption(f"**{n_procs:,}** procedimientos · {len(df):,} registros de adjudicación")
+    Utilice los **filtros** de la barra lateral para acotar por año, tipo de
+    procedimiento, proveedor, categoría de producto o estado del proceso.
+    """)
+
     st.markdown("---")
 
-    # ── KPIs ──
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Procedimientos", f"{n_procs:,}")
-    k2.metric("Monto Total (₡)", fmt_crc(total_monto))
-    k3.metric("Proveedores", f"{n_prov:,}")
-    k4.metric("Desiertos", f"{n_desierto:,}")
+    col_h1, col_h2, col_h3, col_h4 = st.columns(4)
+    col_h1.metric("Procedimientos", f"{n_procs:,}")
+    col_h2.metric("Monto Total (₡)", fmt_crc(total_monto))
+    col_h3.metric("Proveedores", f"{n_prov:,}")
+    col_h4.metric("Desiertos", f"{n_desierto:,}")
+
     st.markdown("---")
+
+    lc1, lc2, lc3 = st.columns(3)
+
+    with lc1:
+        st.subheader("💰 Gasto")
+        st.markdown("""
+        Visión integral del gasto público adjudicado:
+        - **Top Proveedores** por monto adjudicado
+        - **Top 50** adjudicaciones de mayor monto
+        - **Análisis Temporal** mensual y anual
+        - **Distribución** por tipo y modalidad de procedimiento
+        - **Categorías de producto** con clasificación automática
+        - **Recursos / Apelaciones** permitidas
+        - **Concentración** del gasto entre proveedores
+        - **Plazos** del proceso, ventana de ofertas y vigencia contractual
+        - **Tabla de detalle completo** con descarga CSV
+        """)
+
+    with lc2:
+        st.subheader("🚨 Anomalías")
+        st.markdown("""
+        Detección automática de procedimientos atípicos:
+        - **Outliers estadísticos**: montos que exceden 2σ del promedio global
+        - **Outliers por tipo**: montos atípicos dentro de cada tipo de procedimiento
+        - **Montos inusualmente bajos** para su categoría
+        - **Gráfico scatter** con umbral y promedio superpuestos
+        - **Tabla descargable** de todos los procedimientos anómalos con
+          la razón específica de cada alerta
+        """)
+
+    with lc3:
+        st.subheader("🔎 Oferentes")
+        st.markdown("""
+        Análisis detallado de los proveedores adjudicados:
+        - **Treemap** de gasto por categoría y oferente
+        - **Top 5 oferentes** por cada categoría de producto
+        - **Concentración por categoría**: dominancia del Top 1 y Top 3
+        - **Oferentes multi-categoría**: proveedores diversificados
+        - **Drill-down** individual por oferente (gráfico + tabla)
+        - **Tabla completa** de oferentes con descarga CSV
+        """)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: GASTO
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_gasto:
 
     # ── TOP PROVEEDORES ──
     st.subheader("🏆 Top Proveedores por Monto Adjudicado")
-
-    prov_rank = (
-        op_filtered
-        .groupby(["cédula proveedor", "nombre proveedor", "tipo proveedor",
-                  "tamaño proveedor", "provincia"])
-        .agg(monto_total=("monto_crc", "sum"), ordenes=("monto_crc", "count"))
-        .reset_index()
-        .sort_values("monto_total", ascending=False)
-    )
-    prov_rank = prov_rank[prov_rank["monto_total"] > 0]
-    prov_rank["nombre proveedor"] = prov_rank["nombre proveedor"].fillna(
-        prov_rank["cédula proveedor"]
-    )
 
     top_n = st.slider("Proveedores a mostrar", 10, 50, 25, key="prov_slider")
     top_prov = prov_rank.head(top_n).copy()
@@ -434,9 +499,8 @@ if vista == "Adjudicaciones":
 
     st.markdown("---")
 
-    # ── TOP 50 ADJUDICACIONES ──
+    # ── TOP 50 ──
     st.subheader("💰 Top 50 Adjudicaciones por Monto")
-    proc_summary = proc_dedup.copy()
 
     top50 = proc_summary[proc_summary["monto_total_crc"] > 0].head(50)
     top50_disp = top50[[
@@ -454,7 +518,6 @@ if vista == "Adjudicaciones":
     ).dt.strftime("%Y-%m-%d")
     top50_disp.index = range(1, len(top50_disp) + 1)
     st.dataframe(top50_disp, width="stretch", height=1200)
-
     csv50 = top50_disp.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Descargar Top 50 (CSV)", csv50,
                        "top50_adjudicaciones.csv", "text/csv")
@@ -611,10 +674,10 @@ if vista == "Adjudicaciones":
         top10_share = prov_rank_all.head(10)["pct"].sum()
         top5_share  = prov_rank_all.head(5)["pct"].sum()
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Top 5 proveedores", f"{top5_share:.1f}% del gasto")
-        c2.metric("Top 10 proveedores", f"{top10_share:.1f}% del gasto")
-        c3.metric("Total proveedores con montos", f"{len(prov_rank_all):,}")
+        cc1, cc2, cc3 = st.columns(3)
+        cc1.metric("Top 5 proveedores", f"{top5_share:.1f}% del gasto")
+        cc2.metric("Top 10 proveedores", f"{top10_share:.1f}% del gasto")
+        cc3.metric("Total proveedores con montos", f"{len(prov_rank_all):,}")
 
         fig_conc = px.line(
             prov_rank_all.head(30), x="nombre proveedor", y="pct_acum",
@@ -734,7 +797,37 @@ if vista == "Adjudicaciones":
 
     st.markdown("---")
 
-    # ── ANOMALÍAS ──
+    # ── DETALLE COMPLETO ──
+    st.subheader("📑 Detalle Completo")
+
+    detail = proc_summary[[
+        "número de procedimiento", "descripción", "categoría", "proveedores",
+        "monto_total_crc", "tipo procedimiento", "modalidad procedimiento",
+        "fecha_adj", "desierto", "permite recursos", "n_contratos",
+    ]].copy()
+    detail.columns = [
+        "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
+        "Monto (₡)", "Tipo", "Modalidad",
+        "Fecha Adj. Firme", "Desierto", "Recursos", "Contratos",
+    ]
+    detail = detail.sort_values("Monto (₡)", ascending=False)
+    detail["Monto (₡)"]       = detail["Monto (₡)"].apply(fmt_crc)
+    detail["Fecha Adj. Firme"] = pd.to_datetime(
+        detail["Fecha Adj. Firme"], errors="coerce"
+    ).dt.strftime("%Y-%m-%d")
+    detail.index = range(1, len(detail) + 1)
+
+    st.dataframe(detail, width="stretch", height=600)
+    csv_all = detail.to_csv(index=False).encode("utf-8")
+    st.download_button("📥 Descargar todo (CSV)", csv_all,
+                       "adjudicaciones_completo.csv", "text/csv")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: ANOMALÍAS
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_anomalias:
     st.subheader("🚨 Anomalías Detectadas")
     st.caption("Procedimientos con montos estadísticamente atípicos o patrones inusuales")
 
@@ -807,46 +900,17 @@ if vista == "Adjudicaciones":
     else:
         st.info("Datos insuficientes para detectar anomalías.")
 
-    st.markdown("---")
-
-    # ── DETALLE COMPLETO ──
-    st.subheader("📑 Detalle Completo")
-
-    detail = proc_summary[[
-        "número de procedimiento", "descripción", "categoría", "proveedores",
-        "monto_total_crc", "tipo procedimiento", "modalidad procedimiento",
-        "fecha_adj", "desierto", "permite recursos", "n_contratos",
-    ]].copy()
-    detail.columns = [
-        "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
-        "Monto (₡)", "Tipo", "Modalidad",
-        "Fecha Adj. Firme", "Desierto", "Recursos", "Contratos",
-    ]
-    detail = detail.sort_values("Monto (₡)", ascending=False)
-    detail["Monto (₡)"]       = detail["Monto (₡)"].apply(fmt_crc)
-    detail["Fecha Adj. Firme"] = pd.to_datetime(
-        detail["Fecha Adj. Firme"], errors="coerce"
-    ).dt.strftime("%Y-%m-%d")
-    detail.index = range(1, len(detail) + 1)
-
-    st.dataframe(detail, width="stretch", height=600)
-    csv_all = detail.to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Descargar todo (CSV)", csv_all,
-                       "adjudicaciones_completo.csv", "text/csv")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# VIEW: ANÁLISIS DE OFERENTES
+# TAB: OFERENTES
 # ══════════════════════════════════════════════════════════════════════════════
 
-else:
-    st.title(f"🔎 Análisis de Oferentes — {inst_label}")
+with tab_oferentes:
 
-    # ── base data: op_filtered already has category ──
     op_ofer = op_filtered[op_filtered["monto_crc"] > 0].copy()
     op_ofer["nombre proveedor"] = op_ofer["nombre proveedor"].fillna(op_ofer["cédula proveedor"])
     op_ofer["categoría"] = op_ofer["categoría"].fillna("Sin categoría")
 
-    # ── aggregate by proveedor ──
     prov_agg = (
         op_ofer.groupby(["cédula proveedor", "nombre proveedor", "tipo proveedor",
                          "tamaño proveedor", "provincia"])
@@ -860,7 +924,6 @@ else:
         .sort_values("monto_total", ascending=False)
     )
 
-    # ── aggregate by proveedor × categoría ──
     prov_cat = (
         op_ofer.groupby(["nombre proveedor", "cédula proveedor", "categoría"])
         .agg(monto=("monto_crc", "sum"), ordenes=("monto_crc", "count"),
@@ -869,7 +932,6 @@ else:
         .sort_values("monto", ascending=False)
     )
 
-    # ── KPIs ──
     total_ofer = prov_agg["cédula proveedor"].nunique()
     total_gasto = prov_agg["monto_total"].sum()
     avg_gasto = prov_agg["monto_total"].mean() if len(prov_agg) else 0
@@ -883,19 +945,12 @@ else:
     ok2.metric("Gasto Total (₡)", fmt_crc(total_gasto))
     ok3.metric("Gasto Promedio / Oferente", fmt_crc(avg_gasto))
     ok4.metric("Categorías Activas", f"{cats_activas}")
-
     st.markdown("---")
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # 1. GASTO POR CATEGORÍA — TREEMAP
-    # ══════════════════════════════════════════════════════════════════════════
-
+    # ── 1. TREEMAP ──
     st.subheader("🗺️ Gasto por Oferente y Categoría")
-
     treemap_data = prov_cat[prov_cat["monto"] > 0].copy()
-    treemap_data = treemap_data.sort_values("monto", ascending=False)
-    # Keep top 100 to avoid cluttered treemap
-    treemap_top = treemap_data.head(100)
+    treemap_top = treemap_data.sort_values("monto", ascending=False).head(100)
 
     fig_tree = px.treemap(
         treemap_top, path=["categoría", "nombre proveedor"], values="monto",
@@ -904,16 +959,10 @@ else:
     )
     fig_tree.update_layout(height=600)
     st.plotly_chart(fig_tree, use_container_width=True)
-
     st.markdown("---")
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # 2. TOP OFERENTE POR CATEGORÍA
-    # ══════════════════════════════════════════════════════════════════════════
-
+    # ── 2. TOP OFERENTES POR CATEGORÍA ──
     st.subheader("🏅 Top Oferentes por Categoría")
-
-    # For each category, show top 5 providers
     cat_totals = prov_cat.groupby("categoría")["monto"].sum().reset_index()
     cat_totals.columns = ["categoría", "monto_cat_total"]
     prov_cat_pct = prov_cat.merge(cat_totals, on="categoría")
@@ -937,13 +986,9 @@ else:
     fig_top_cat.for_each_yaxis(lambda y: y.update(categoryorder="total ascending"))
     fig_top_cat.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1][:25]))
     st.plotly_chart(fig_top_cat, use_container_width=True)
-
     st.markdown("---")
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # 3. CONCENTRACIÓN POR CATEGORÍA
-    # ══════════════════════════════════════════════════════════════════════════
-
+    # ── 3. CONCENTRACIÓN POR CATEGORÍA ──
     st.subheader("📊 Concentración del Gasto por Categoría")
     st.caption("Porcentaje del gasto de cada categoría controlado por el Top 1 y Top 3 oferentes")
 
@@ -956,7 +1001,7 @@ else:
         top1 = grp_sorted.head(1)["monto"].sum() / cat_total * 100
         top3 = grp_sorted.head(3)["monto"].sum() / cat_total * 100
         n_ofer = len(grp_sorted)
-        lider = grp_sorted.iloc[0]["nombre proveedor"] if len(grp_sorted) > 0 else ""
+        lider = grp_sorted.iloc[0]["nombre proveedor"]
         conc_rows.append({
             "Categoría": cat, "Gasto Total": cat_total,
             "Top 1 (%)": round(top1, 1), "Top 3 (%)": round(top3, 1),
@@ -976,8 +1021,7 @@ else:
         )
         fig_conc_cat.update_layout(
             yaxis={"categoryorder": "total ascending"},
-            height=max(400, len(conc_df) * 35),
-            legend_title_text="",
+            height=max(400, len(conc_df) * 35), legend_title_text="",
         )
         st.plotly_chart(fig_conc_cat, use_container_width=True)
 
@@ -989,10 +1033,7 @@ else:
 
     st.markdown("---")
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # 4. OFERENTES MULTI-CATEGORÍA
-    # ══════════════════════════════════════════════════════════════════════════
-
+    # ── 4. MULTI-CATEGORÍA ──
     st.subheader("🔗 Oferentes Multi-Categoría")
     st.caption("Proveedores que participan en múltiples categorías de gasto")
 
@@ -1025,10 +1066,7 @@ else:
 
     st.markdown("---")
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # 5. DETALLE OFERENTE — drill-down
-    # ══════════════════════════════════════════════════════════════════════════
-
+    # ── 5. DETALLE OFERENTE ──
     st.subheader("🔍 Detalle por Oferente")
 
     top_list = prov_agg.head(50)["nombre proveedor"].tolist()
