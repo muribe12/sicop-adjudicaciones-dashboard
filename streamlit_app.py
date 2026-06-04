@@ -1030,6 +1030,14 @@ with tab_anomalias:
             anom_disp.columns = ["Procedimiento", "Descripción", "Proveedor(es)",
                                  "Monto (₡)", "Tipo", "Fecha",
                                  "Vigencia Contrato (días)", "Razón"]
+            anom_disp["Monto/Día (₡)"] = np.where(
+                anom_disp["Vigencia Contrato (días)"].notna() & (anom_disp["Vigencia Contrato (días)"] > 0),
+                anomalies["monto_total_crc"] / anom_disp["Vigencia Contrato (días)"],
+                np.nan,
+            )
+            anom_disp["Monto/Día (₡)"] = anom_disp["Monto/Día (₡)"].apply(
+                lambda v: fmt_crc(v) if pd.notna(v) else "—"
+            )
             anom_disp["Monto (₡)"] = anom_disp["Monto (₡)"].apply(fmt_crc)
             anom_disp["Fecha"] = pd.to_datetime(anom_disp["Fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
             anom_disp.index = range(1, len(anom_disp) + 1)
