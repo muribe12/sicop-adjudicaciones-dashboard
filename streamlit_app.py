@@ -1024,10 +1024,12 @@ with tab_anomalias:
         if len(anomalies) > 0:
             anom_disp = anomalies[[
                 "número de procedimiento", "descripción", "proveedores",
-                "monto_total_crc", "tipo procedimiento", "fecha_adj", "anomalía",
+                "monto_total_crc", "tipo procedimiento", "fecha_adj",
+                "vigencia_dias", "anomalía",
             ]].copy()
             anom_disp.columns = ["Procedimiento", "Descripción", "Proveedor(es)",
-                                 "Monto (₡)", "Tipo", "Fecha", "Razón"]
+                                 "Monto (₡)", "Tipo", "Fecha",
+                                 "Vigencia Contrato (días)", "Razón"]
             anom_disp["Monto (₡)"] = anom_disp["Monto (₡)"].apply(fmt_crc)
             anom_disp["Fecha"] = pd.to_datetime(anom_disp["Fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
             anom_disp.index = range(1, len(anom_disp) + 1)
