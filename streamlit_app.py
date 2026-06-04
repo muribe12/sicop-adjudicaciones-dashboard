@@ -797,6 +797,147 @@ with tab_gasto:
 
     st.markdown("---")
 
+    # ── EXPLOSIÓN DE CATEGORÍAS ──
+    st.subheader("🔥 Explosión de Categorías")
+    st.caption("Categorías cuyo gasto ha crecido más rápidamente entre períodos")
+
+    cat_time = proc_summary[
+        proc_summary["fecha_adj"].notna()
+        & proc_summary["categoría"].notna()
+        & (proc_summary["categoría"] != "Sin categoría")
+        & (proc_summary["monto_total_crc"] > 0)
+    ].copy()
+    cat_time["año"] = cat_time["fecha_adj"].dt.year
+
+    cat_years = sorted(cat_time["año"].unique())
+    if len(cat_years) >= 2:
+        cat_yr = (
+            cat_time.groupby(["categoría", "año"])
+            .agg(monto=("monto_total_crc", "sum"), n_procs=("número de procedimiento", "nunique"))
+            .reset_index()
+        )
+
+        fig_cat_evo = px.line(
+            cat_yr, x="año", y="monto", color="categoría",
+            markers=True,
+            title="Evolución del Gasto por Categoría",
+            labels={"año": "Año", "monto": "Monto (₡)", "categoría": "Categoría"},
+        )
+        fig_cat_evo.update_layout(height=450, xaxis=dict(dtick=1))
+        st.plotly_chart(fig_cat_evo, use_container_width=True)
+
+        last_yr = cat_years[-1]
+        prev_yr = cat_years[-2]
+
+        cat_last = cat_yr[cat_yr["año"] == last_yr].set_index("categoría")
+        cat_prev = cat_yr[cat_yr["año"] == prev_yr].set_index("categoría")
+
+        cat_growth = cat_last[["monto", "n_procs"]].join(
+            cat_prev[["monto", "n_procs"]], lsuffix=f"_{last_yr}", rsuffix=f"_{prev_yr}",
+            how="outer",
+        ).fillna(0)
+        cat_growth[f"monto_{last_yr}"] = cat_growth[f"monto_{last_yr}"].astype(float)
+        cat_growth[f"monto_{prev_yr}"] = cat_growth[f"monto_{prev_yr}"].astype(float)
+
+        cat_growth["crecimiento_pct"] = np.where(
+            cat_growth[f"monto_{prev_yr}"] > 0,
+            ((cat_growth[f"monto_{last_yr}"] - cat_growth[f"monto_{prev_yr}"])
+             / cat_growth[f"monto_{prev_yr}"] * 100),
+            np.where(cat_growth[f"monto_{last_yr}"] > 0, 999.9, 0),
+        )
+        cat_growth["cambio_abs"] = cat_growth[f"monto_{last_yr}"] - cat_growth[f"monto_{prev_yr}"]
+        cat_growth = cat_growth.sort_values("crecimiento_pct", ascending=False).reset_index()
+
+        median_monto = cat_growth[f"monto_{last_yr}"].median()
+        cat_growth["explosión"] = (
+            (cat_growth["crecimiento_pct"] > 100) |
+            ((cat_growth[f"monto_{prev_yr}"] == 0)
+             & (cat_growth[f"monto_{last_yr}"] > median_monto))
+        )
+
+        n_explosions = cat_growth["explosión"].sum()
+        max_growth = cat_growth["crecimiento_pct"].max()
+        max_change = cat_growth["cambio_abs"].max()
+
+        ek1, ek2, ek3 = st.columns(3)
+        ek1.metric("Categorías con explosión de gasto", f"{n_explosions}")
+        ek2.metric("Mayor crecimiento", f"{max_growth:+,.1f}%" if max_growth < 999.9
+                   else "Nueva categoría")
+        ek3.metric("Mayor incremento absoluto", fmt_crc(max_change))
+
+        fig_cat_growth = px.bar(
+            cat_growth.sort_values("crecimiento_pct", ascending=True),
+            x="crecimiento_pct", y="categoría",
+            color="explosión",
+            color_discrete_map={True: "#e74c3c", False: "#3498db"},
+            hover_data=[f"monto_{prev_yr}", f"monto_{last_yr}", "cambio_abs",
+                        f"n_procs_{last_yr}", f"n_procs_{prev_yr}"],
+            title=f"Crecimiento del Gasto por Categoría: {prev_yr} → {last_yr}",
+            labels={
+                "crecimiento_pct": "Crecimiento (%)",
+                "categoría": "",
+                "explosión": "Explosión (>100%)",
+                f"monto_{prev_yr}": f"Monto {prev_yr} (₡)",
+                f"monto_{last_yr}": f"Monto {last_yr} (₡)",
+                "cambio_abs": "Cambio Absoluto (₡)",
+                f"n_procs_{last_yr}": f"# Procs {last_yr}",
+                f"n_procs_{prev_yr}": f"# Procs {prev_yr}",
+            },
+            orientation="h",
+        )
+        fig_cat_growth.add_vline(x=100, line_dash="dash", line_color="red",
+                                 annotation_text="Umbral 100%")
+        fig_cat_growth.add_vline(x=0, line_dash="dot", line_color="gray")
+        fig_cat_growth.update_layout(height=max(400, len(cat_growth) * 35), showlegend=True)
+        st.plotly_chart(fig_cat_growth, use_container_width=True)
+
+        fig_cat_scatter = px.scatter(
+            cat_growth, x="crecimiento_pct", y="cambio_abs",
+            size=f"monto_{last_yr}", color="explosión",
+            color_discrete_map={True: "#e74c3c", False: "#95a5a6"},
+            hover_data=["categoría", f"monto_{prev_yr}", f"monto_{last_yr}"],
+            title=f"Crecimiento % vs Incremento Absoluto ({prev_yr} → {last_yr})",
+            labels={
+                "crecimiento_pct": "Crecimiento (%)",
+                "cambio_abs": "Cambio Absoluto (₡)",
+                f"monto_{last_yr}": f"Monto {last_yr} (₡)",
+                "explosión": "Explosión",
+            },
+            text="categoría",
+        )
+        fig_cat_scatter.update_traces(textposition="top center", textfont_size=9,
+                                      marker=dict(sizemin=5))
+        fig_cat_scatter.add_vline(x=100, line_dash="dash", line_color="red",
+                                  annotation_text="100%")
+        fig_cat_scatter.add_hline(y=0, line_dash="dot", line_color="gray")
+        fig_cat_scatter.update_layout(height=500, showlegend=True)
+        st.plotly_chart(fig_cat_scatter, use_container_width=True)
+
+        cat_tbl = cat_growth[[
+            "categoría", f"monto_{prev_yr}", f"monto_{last_yr}",
+            "cambio_abs", "crecimiento_pct",
+            f"n_procs_{prev_yr}", f"n_procs_{last_yr}", "explosión",
+        ]].copy()
+        cat_tbl.columns = [
+            "Categoría", f"Monto {prev_yr} (₡)", f"Monto {last_yr} (₡)",
+            "Cambio Absoluto (₡)", "Crecimiento (%)",
+            f"# Procs {prev_yr}", f"# Procs {last_yr}", "Explosión",
+        ]
+        cat_tbl[f"Monto {prev_yr} (₡)"] = cat_tbl[f"Monto {prev_yr} (₡)"].apply(fmt_crc)
+        cat_tbl[f"Monto {last_yr} (₡)"] = cat_tbl[f"Monto {last_yr} (₡)"].apply(fmt_crc)
+        cat_tbl["Cambio Absoluto (₡)"] = cat_tbl["Cambio Absoluto (₡)"].apply(fmt_crc)
+        cat_tbl["Explosión"] = cat_tbl["Explosión"].map({True: "🔥 Sí", False: ""})
+        cat_tbl.index = range(1, len(cat_tbl) + 1)
+        st.dataframe(cat_tbl, width="stretch", height=400)
+
+        csv_cat_exp = cat_tbl.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Descargar explosión de categorías (CSV)", csv_cat_exp,
+                           "explosion_categorias.csv", "text/csv")
+    else:
+        st.info("Se requieren al menos 2 años de datos para analizar explosión de categorías.")
+
+    st.markdown("---")
+
     # ── DETALLE COMPLETO ──
     st.subheader("📑 Detalle Completo")
 
