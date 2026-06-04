@@ -900,6 +900,95 @@ with tab_anomalias:
     else:
         st.info("Datos insuficientes para detectar anomalías.")
 
+    st.markdown("---")
+
+    # ── CRECIMIENTO DE PROVEEDORES ──
+    st.subheader("📈 Proveedores con Mayor Crecimiento")
+    st.caption("Crecimiento interanual del monto adjudicado por proveedor (burbuja = # adjudicaciones)")
+
+    proc_dates = df[["número de procedimiento", "fecha_adj"]].drop_duplicates("número de procedimiento")
+    proc_dates["año"] = proc_dates["fecha_adj"].dt.year
+    op_year = op_filtered.merge(
+        proc_dates[["número de procedimiento", "año"]],
+        left_on="número procedimiento", right_on="número de procedimiento", how="left",
+    ).drop(columns=["número de procedimiento"], errors="ignore")
+    op_year = op_year[op_year["año"].notna()].copy()
+    op_year["año"] = op_year["año"].astype(int)
+
+    prov_year = (
+        op_year.groupby(["nombre proveedor", "cédula proveedor", "año"])
+        .agg(monto=("monto_crc", "sum"), n_adj=("número procedimiento", "nunique"))
+        .reset_index()
+    )
+
+    years_available = sorted(prov_year["año"].unique())
+    if len(years_available) >= 2:
+        last_year = years_available[-1]
+        prev_year = years_available[-2]
+
+        py_last = prov_year[prov_year["año"] == last_year].set_index("cédula proveedor")
+        py_prev = prov_year[prov_year["año"] == prev_year].set_index("cédula proveedor")
+
+        growth = py_last[["nombre proveedor", "monto", "n_adj"]].join(
+            py_prev[["monto", "n_adj"]], lsuffix="_last", rsuffix="_prev", how="inner"
+        )
+        growth = growth[growth["monto_prev"] > 0].copy()
+        growth["crecimiento_pct"] = ((growth["monto_last"] - growth["monto_prev"]) / growth["monto_prev"] * 100).round(1)
+        growth["total_adj"] = growth["n_adj_last"] + growth["n_adj_prev"]
+        growth = growth.sort_values("crecimiento_pct", ascending=False).reset_index()
+
+        if len(growth) >= 3:
+            gk1, gk2, gk3 = st.columns(3)
+            n_crecieron = (growth["crecimiento_pct"] > 0).sum()
+            n_bajaron   = (growth["crecimiento_pct"] < 0).sum()
+            max_crec    = growth["crecimiento_pct"].max()
+            gk1.metric("Proveedores que crecieron", f"{n_crecieron:,}")
+            gk2.metric("Proveedores que bajaron", f"{n_bajaron:,}")
+            gk3.metric("Mayor crecimiento", f"{max_crec:+.1f}%")
+
+            fig_growth = px.scatter(
+                growth, x="crecimiento_pct", y="monto_last",
+                size="total_adj", color="crecimiento_pct",
+                color_continuous_scale="RdYlGn", color_continuous_midpoint=0,
+                hover_data=["nombre proveedor", "monto_prev", "monto_last",
+                            "n_adj_last", "n_adj_prev"],
+                text="nombre proveedor",
+                title=f"Crecimiento de Proveedores: {prev_year} → {last_year}",
+                labels={
+                    "crecimiento_pct": "Crecimiento (%)",
+                    "monto_last": f"Monto {last_year} (₡)",
+                    "total_adj": "Adjudicaciones (total)",
+                    "nombre proveedor": "Proveedor",
+                    "monto_prev": f"Monto {prev_year}",
+                },
+            )
+            fig_growth.update_traces(textposition="top center",
+                                     textfont_size=9,
+                                     marker=dict(sizemin=5))
+            fig_growth.add_vline(x=0, line_dash="dash", line_color="gray",
+                                 annotation_text="Sin cambio")
+            fig_growth.update_layout(height=600, showlegend=False)
+            st.plotly_chart(fig_growth, use_container_width=True)
+
+            growth_tbl = growth[["nombre proveedor", "cédula proveedor",
+                                  "monto_prev", "monto_last", "crecimiento_pct",
+                                  "n_adj_prev", "n_adj_last"]].copy()
+            growth_tbl.columns = ["Proveedor", "Cédula",
+                                   f"Monto {prev_year} (₡)", f"Monto {last_year} (₡)",
+                                   "Crecimiento (%)", f"Adj. {prev_year}", f"Adj. {last_year}"]
+            growth_tbl[f"Monto {prev_year} (₡)"] = growth_tbl[f"Monto {prev_year} (₡)"].apply(fmt_crc)
+            growth_tbl[f"Monto {last_year} (₡)"] = growth_tbl[f"Monto {last_year} (₡)"].apply(fmt_crc)
+            growth_tbl.index = range(1, len(growth_tbl) + 1)
+            st.dataframe(growth_tbl, width="stretch", height=400)
+
+            csv_growth = growth_tbl.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Descargar crecimiento (CSV)", csv_growth,
+                               "crecimiento_proveedores.csv", "text/csv")
+        else:
+            st.info("Menos de 3 proveedores presentes en ambos años para calcular crecimiento.")
+    else:
+        st.info("Se requieren al menos 2 años de datos para calcular crecimiento.")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB: OFERENTES
