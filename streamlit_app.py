@@ -902,92 +902,128 @@ with tab_anomalias:
 
     st.markdown("---")
 
-    # ── CRECIMIENTO DE PROVEEDORES ──
-    st.subheader("📈 Proveedores con Mayor Crecimiento")
-    st.caption("Crecimiento interanual del monto adjudicado por proveedor (burbuja = # adjudicaciones)")
+    # ── ANOMALÍAS DE PLAZOS ──
+    st.subheader("⏱️ Anomalías de Plazos")
+    st.caption("Procedimientos cuya duración es estadísticamente atípica para su tipo")
 
-    proc_dates = df[["número de procedimiento", "fecha_adj"]].drop_duplicates("número de procedimiento")
-    proc_dates["año"] = proc_dates["fecha_adj"].dt.year
-    op_year = op_filtered.merge(
-        proc_dates[["número de procedimiento", "año"]],
-        left_on="número procedimiento", right_on="número de procedimiento", how="left",
-    ).drop(columns=["número de procedimiento"], errors="ignore")
-    op_year = op_year[op_year["año"].notna()].copy()
-    op_year["año"] = op_year["año"].astype(int)
+    plazo_anom = proc_summary[
+        proc_summary["plazo_proceso_dias"].notna() & (proc_summary["plazo_proceso_dias"] > 0)
+    ].copy()
 
-    prov_year = (
-        op_year.groupby(["nombre proveedor", "cédula proveedor", "año"])
-        .agg(monto=("monto_crc", "sum"), n_adj=("número procedimiento", "nunique"))
-        .reset_index()
-    )
-
-    years_available = sorted(prov_year["año"].unique())
-    if len(years_available) >= 2:
-        last_year = years_available[-1]
-        prev_year = years_available[-2]
-
-        py_last = prov_year[prov_year["año"] == last_year].set_index("cédula proveedor")
-        py_prev = prov_year[prov_year["año"] == prev_year].set_index("cédula proveedor")
-
-        growth = py_last[["nombre proveedor", "monto", "n_adj"]].join(
-            py_prev[["monto", "n_adj"]], lsuffix="_last", rsuffix="_prev", how="inner"
+    if len(plazo_anom) >= 10:
+        plazo_type_stats = (
+            plazo_anom.groupby("tipo procedimiento")["plazo_proceso_dias"]
+            .agg(["mean", "std", "median"]).reset_index()
         )
-        growth = growth[growth["monto_prev"] > 0].copy()
-        growth["crecimiento_pct"] = ((growth["monto_last"] - growth["monto_prev"]) / growth["monto_prev"] * 100).round(1)
-        growth["total_adj"] = growth["n_adj_last"] + growth["n_adj_prev"]
-        growth = growth.sort_values("crecimiento_pct", ascending=False).reset_index()
+        plazo_type_stats.columns = ["tipo procedimiento", "plazo_mean", "plazo_std", "plazo_median"]
+        plazo_anom = plazo_anom.merge(plazo_type_stats, on="tipo procedimiento", how="left")
+        plazo_anom["plazo_std"] = plazo_anom["plazo_std"].fillna(0)
 
-        if len(growth) >= 3:
-            gk1, gk2, gk3 = st.columns(3)
-            n_crecieron = (growth["crecimiento_pct"] > 0).sum()
-            n_bajaron   = (growth["crecimiento_pct"] < 0).sum()
-            max_crec    = growth["crecimiento_pct"].max()
-            gk1.metric("Proveedores que crecieron", f"{n_crecieron:,}")
-            gk2.metric("Proveedores que bajaron", f"{n_bajaron:,}")
-            gk3.metric("Mayor crecimiento", f"{max_crec:+.1f}%")
+        global_mean = plazo_anom["plazo_proceso_dias"].mean()
+        global_std  = plazo_anom["plazo_proceso_dias"].std()
 
-            fig_growth = px.scatter(
-                growth, x="crecimiento_pct", y="monto_last",
-                size="total_adj", color="crecimiento_pct",
-                color_continuous_scale="RdYlGn", color_continuous_midpoint=0,
-                hover_data=["nombre proveedor", "monto_prev", "monto_last",
-                            "n_adj_last", "n_adj_prev"],
-                text="nombre proveedor",
-                title=f"Crecimiento de Proveedores: {prev_year} → {last_year}",
-                labels={
-                    "crecimiento_pct": "Crecimiento (%)",
-                    "monto_last": f"Monto {last_year} (₡)",
-                    "total_adj": "Adjudicaciones (total)",
-                    "nombre proveedor": "Proveedor",
-                    "monto_prev": f"Monto {prev_year}",
-                },
-            )
-            fig_growth.update_traces(textposition="top center",
-                                     textfont_size=9,
-                                     marker=dict(sizemin=5))
-            fig_growth.add_vline(x=0, line_dash="dash", line_color="gray",
-                                 annotation_text="Sin cambio")
-            fig_growth.update_layout(height=600, showlegend=False)
-            st.plotly_chart(fig_growth, use_container_width=True)
+        plazo_flags = []
+        for _, row in plazo_anom.iterrows():
+            reasons = []
+            d = row["plazo_proceso_dias"]
+            if d > global_mean + 2 * global_std:
+                reasons.append(f"Plazo excede 2σ global (>{global_mean + 2*global_std:.0f} días)")
+            if row["plazo_std"] > 0 and d > row["plazo_mean"] + 2 * row["plazo_std"]:
+                reasons.append(f"Plazo excede 2σ para {row['tipo procedimiento']}")
+            if row["plazo_std"] > 0 and d < row["plazo_mean"] - 1.5 * row["plazo_std"] and d > 0:
+                reasons.append("Plazo inusualmente corto para su tipo")
+            if d <= 3 and row["monto_total_crc"] > global_mean:
+                reasons.append(f"Adjudicado en {d:.0f} días con monto alto")
+            v = row.get("ventana_ofertas_dias")
+            if pd.notna(v) and v > 0 and d > 0 and v / d > 0.9:
+                reasons.append("Ventana de ofertas ≈ plazo total (adjudicación casi inmediata)")
+            plazo_flags.append(" | ".join(reasons) if reasons else "")
+        plazo_anom["anomalía_plazo"] = plazo_flags
 
-            growth_tbl = growth[["nombre proveedor", "cédula proveedor",
-                                  "monto_prev", "monto_last", "crecimiento_pct",
-                                  "n_adj_prev", "n_adj_last"]].copy()
-            growth_tbl.columns = ["Proveedor", "Cédula",
-                                   f"Monto {prev_year} (₡)", f"Monto {last_year} (₡)",
-                                   "Crecimiento (%)", f"Adj. {prev_year}", f"Adj. {last_year}"]
-            growth_tbl[f"Monto {prev_year} (₡)"] = growth_tbl[f"Monto {prev_year} (₡)"].apply(fmt_crc)
-            growth_tbl[f"Monto {last_year} (₡)"] = growth_tbl[f"Monto {last_year} (₡)"].apply(fmt_crc)
-            growth_tbl.index = range(1, len(growth_tbl) + 1)
-            st.dataframe(growth_tbl, width="stretch", height=400)
+        plazo_anomalies = plazo_anom[plazo_anom["anomalía_plazo"] != ""].sort_values(
+            "plazo_proceso_dias", ascending=False
+        )
 
-            csv_growth = growth_tbl.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 Descargar crecimiento (CSV)", csv_growth,
-                               "crecimiento_proveedores.csv", "text/csv")
-        else:
-            st.info("Menos de 3 proveedores presentes en ambos años para calcular crecimiento.")
+        ak1, ak2, ak3 = st.columns(3)
+        ak1.metric("Anomalías de plazo detectadas", f"{len(plazo_anomalies):,}")
+        ak2.metric("Plazo promedio global", f"{global_mean:.0f} días")
+        ak3.metric("Umbral global 2σ", f"{global_mean + 2*global_std:.0f} días")
+
+        plazo_anom["es_anomalía_plazo"] = plazo_anom["anomalía_plazo"] != ""
+        fig_plazo_anom = px.scatter(
+            plazo_anom, x="plazo_proceso_dias", y="monto_total_crc",
+            color="es_anomalía_plazo",
+            color_discrete_map={True: "#e74c3c", False: "#95a5a6"},
+            size="monto_total_crc",
+            hover_data=["número de procedimiento", "descripción", "tipo procedimiento",
+                        "ventana_ofertas_dias", "vigencia_dias"],
+            title="Plazo del Proceso vs Monto (anomalías de plazo en rojo)",
+            labels={"plazo_proceso_dias": "Plazo del Proceso (días)",
+                    "monto_total_crc": "Monto (₡)",
+                    "es_anomalía_plazo": "Anomalía"},
+        )
+        fig_plazo_anom.add_vline(
+            x=global_mean + 2 * global_std, line_dash="dash", line_color="red",
+            annotation_text=f"Umbral 2σ: {global_mean + 2*global_std:.0f}d"
+        )
+        fig_plazo_anom.add_vline(
+            x=global_mean, line_dash="dot", line_color="blue",
+            annotation_text=f"Promedio: {global_mean:.0f}d"
+        )
+        fig_plazo_anom.update_layout(height=550)
+        fig_plazo_anom.update_traces(marker=dict(sizemin=4, sizeref=2.*max(plazo_anom["monto_total_crc"])/(40.**2)))
+        st.plotly_chart(fig_plazo_anom, use_container_width=True)
+
+        fig_box_plazo = px.box(
+            plazo_anom, x="tipo procedimiento", y="plazo_proceso_dias",
+            color="tipo procedimiento",
+            points="outliers",
+            title="Distribución de Plazos por Tipo (outliers visibles)",
+            labels={"tipo procedimiento": "", "plazo_proceso_dias": "Días"},
+        )
+        fig_box_plazo.update_layout(height=400, showlegend=False, xaxis_tickangle=-30)
+        st.plotly_chart(fig_box_plazo, use_container_width=True)
+
+        fast_track = plazo_anom[
+            (plazo_anom["plazo_proceso_dias"] <= 7) & (plazo_anom["monto_total_crc"] > 0)
+        ].sort_values("monto_total_crc", ascending=False)
+
+        if len(fast_track) > 0:
+            st.markdown("---")
+            st.subheader("⚡ Adjudicaciones Rápidas (≤ 7 días)")
+            st.caption(f"{len(fast_track)} procedimientos adjudicados en 7 días o menos")
+
+            fast_disp = fast_track[[
+                "número de procedimiento", "descripción", "tipo procedimiento",
+                "plazo_proceso_dias", "ventana_ofertas_dias", "monto_total_crc",
+                "proveedores",
+            ]].head(30).copy()
+            fast_disp.columns = ["Procedimiento", "Descripción", "Tipo",
+                                 "Plazo (días)", "Ventana Ofertas (días)",
+                                 "Monto (₡)", "Proveedor(es)"]
+            fast_disp["Monto (₡)"] = fast_disp["Monto (₡)"].apply(fmt_crc)
+            fast_disp.index = range(1, len(fast_disp) + 1)
+            st.dataframe(fast_disp, width="stretch", height=400)
+
+        if len(plazo_anomalies) > 0:
+            st.markdown("---")
+            pa_disp = plazo_anomalies[[
+                "número de procedimiento", "descripción", "tipo procedimiento",
+                "plazo_proceso_dias", "ventana_ofertas_dias", "vigencia_dias",
+                "monto_total_crc", "anomalía_plazo",
+            ]].copy()
+            pa_disp.columns = ["Procedimiento", "Descripción", "Tipo",
+                               "Plazo Proceso (días)", "Ventana Ofertas (días)",
+                               "Vigencia (días)", "Monto (₡)", "Razón"]
+            pa_disp["Monto (₡)"] = pa_disp["Monto (₡)"].apply(fmt_crc)
+            pa_disp.index = range(1, len(pa_disp) + 1)
+            st.dataframe(pa_disp, width="stretch", height=500)
+
+            csv_pa = pa_disp.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Descargar anomalías de plazo (CSV)", csv_pa,
+                               "anomalias_plazos.csv", "text/csv")
     else:
-        st.info("Se requieren al menos 2 años de datos para calcular crecimiento.")
+        st.info("Datos insuficientes de plazos para detectar anomalías.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
