@@ -1025,6 +1025,131 @@ with tab_anomalias:
     else:
         st.info("Datos insuficientes de plazos para detectar anomalías.")
 
+    st.markdown("---")
+
+    # ── CONCENTRACIÓN DE PROVEEDORES POR CATEGORÍA ──
+    st.subheader("🏢 Concentración Anómala de Proveedores por Categoría")
+    st.caption("Categorías donde un solo proveedor acapara una proporción desproporcionada del monto")
+
+    op_cat = op_filtered[
+        (op_filtered["monto_crc"] > 0) & op_filtered["categoría"].notna()
+        & (op_filtered["categoría"] != "Sin categoría")
+    ].copy()
+
+    if len(op_cat) >= 20:
+        cat_totals = op_cat.groupby("categoría").agg(
+            monto_cat=("monto_crc", "sum"),
+            n_proveedores=("cédula proveedor", "nunique"),
+            n_contratos=("número procedimiento", "nunique"),
+        ).reset_index()
+        cat_totals = cat_totals[cat_totals["monto_cat"] > 0]
+
+        prov_cat = op_cat.groupby(["categoría", "cédula proveedor", "nombre proveedor"]).agg(
+            monto_prov=("monto_crc", "sum"),
+            n_contratos_prov=("número procedimiento", "nunique"),
+        ).reset_index()
+        idx_top = prov_cat.groupby("categoría")["monto_prov"].idxmax()
+        top_prov = prov_cat.loc[idx_top]
+
+        conc = cat_totals.merge(
+            top_prov[["categoría", "nombre proveedor", "cédula proveedor",
+                       "monto_prov", "n_contratos_prov"]],
+            on="categoría", how="left",
+        )
+        conc["pct_concentración"] = (conc["monto_prov"] / conc["monto_cat"] * 100).round(1)
+
+        def calc_hhi(grp):
+            shares = grp["monto_crc"] / grp["monto_crc"].sum() * 100
+            return (shares ** 2).sum()
+        hhi_cat = op_cat.groupby("categoría").apply(calc_hhi, include_groups=False).reset_index()
+        hhi_cat.columns = ["categoría", "hhi"]
+        conc = conc.merge(hhi_cat, on="categoría", how="left")
+
+        conc["es_anomalía"] = (
+            (conc["pct_concentración"] > 60) |
+            (conc["hhi"] > 4000) |
+            ((conc["n_proveedores"] == 1) & (conc["n_contratos"] >= 3))
+        )
+        conc = conc.sort_values("pct_concentración", ascending=False)
+
+        anomalías_conc = conc[conc["es_anomalía"]]
+        n_anom_conc = len(anomalías_conc)
+        avg_conc = conc["pct_concentración"].mean()
+        max_conc = conc["pct_concentración"].max()
+
+        ck1, ck2, ck3 = st.columns(3)
+        ck1.metric("Categorías con concentración anómala", f"{n_anom_conc}")
+        ck2.metric("Concentración promedio del top proveedor", f"{avg_conc:.1f}%")
+        ck3.metric("Mayor concentración", f"{max_conc:.1f}%")
+
+        fig_conc_bar = px.bar(
+            conc.sort_values("pct_concentración", ascending=True),
+            x="pct_concentración", y="categoría",
+            color="es_anomalía",
+            color_discrete_map={True: "#e74c3c", False: "#3498db"},
+            hover_data=["nombre proveedor", "monto_prov", "monto_cat",
+                        "n_proveedores", "hhi"],
+            title="% del Monto Concentrado en el Proveedor Principal (por Categoría)",
+            labels={"pct_concentración": "Concentración (%)",
+                    "categoría": "",
+                    "es_anomalía": "Anomalía",
+                    "nombre proveedor": "Proveedor principal",
+                    "monto_prov": "Monto proveedor (₡)",
+                    "monto_cat": "Monto categoría (₡)",
+                    "n_proveedores": "# Proveedores",
+                    "hhi": "HHI"},
+            orientation="h",
+        )
+        fig_conc_bar.add_vline(x=60, line_dash="dash", line_color="red",
+                               annotation_text="Umbral 60%")
+        fig_conc_bar.update_layout(height=max(400, len(conc) * 35), showlegend=True)
+        st.plotly_chart(fig_conc_bar, use_container_width=True)
+
+        fig_hhi = px.scatter(
+            conc, x="n_proveedores", y="hhi",
+            size="monto_cat", color="es_anomalía",
+            color_discrete_map={True: "#e74c3c", False: "#95a5a6"},
+            hover_data=["categoría", "nombre proveedor", "pct_concentración"],
+            title="Índice HHI vs Número de Proveedores por Categoría",
+            labels={"n_proveedores": "# Proveedores en la Categoría",
+                    "hhi": "Índice HHI",
+                    "monto_cat": "Monto Total (₡)",
+                    "es_anomalía": "Anomalía"},
+        )
+        fig_hhi.add_hline(y=4000, line_dash="dash", line_color="red",
+                          annotation_text="HHI > 4000: Alta concentración")
+        fig_hhi.add_hline(y=2500, line_dash="dot", line_color="orange",
+                          annotation_text="HHI > 2500: Moderada")
+        fig_hhi.update_layout(height=500)
+        fig_hhi.update_traces(marker=dict(sizemin=6,
+                              sizeref=2.*max(conc["monto_cat"])/(40.**2)))
+        st.plotly_chart(fig_hhi, use_container_width=True)
+
+        if n_anom_conc > 0:
+            st.markdown("#### Detalle de Categorías con Concentración Anómala")
+            conc_disp = anomalías_conc[[
+                "categoría", "nombre proveedor", "pct_concentración",
+                "monto_prov", "monto_cat", "n_proveedores", "n_contratos",
+                "n_contratos_prov", "hhi",
+            ]].copy()
+            conc_disp.columns = [
+                "Categoría", "Proveedor Principal", "Concentración (%)",
+                "Monto Proveedor (₡)", "Monto Categoría (₡)",
+                "# Proveedores", "# Contratos Total",
+                "# Contratos Proveedor", "HHI",
+            ]
+            conc_disp["Monto Proveedor (₡)"] = conc_disp["Monto Proveedor (₡)"].apply(fmt_crc)
+            conc_disp["Monto Categoría (₡)"] = conc_disp["Monto Categoría (₡)"].apply(fmt_crc)
+            conc_disp["HHI"] = conc_disp["HHI"].round(0).astype(int)
+            conc_disp.index = range(1, len(conc_disp) + 1)
+            st.dataframe(conc_disp, width="stretch", height=400)
+
+            csv_conc = conc_disp.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Descargar concentración anómala (CSV)", csv_conc,
+                               "concentracion_anomala_categorias.csv", "text/csv")
+    else:
+        st.info("Datos insuficientes para analizar concentración por categoría.")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB: OFERENTES
