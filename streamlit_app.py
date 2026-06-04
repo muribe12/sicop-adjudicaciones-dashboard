@@ -208,11 +208,14 @@ def prepare_data(tables: dict[str, pd.DataFrame]):
 
     # ── 3. description + tipo from detalle_pliego ──
     dp["categoría"] = dp["descripción"].apply(categorize_description)
+    dp["fecha_publicacion"] = pd.to_datetime(dp["fecha publicación"], errors="coerce")
+    dp["fecha_cierre"]      = pd.to_datetime(dp["fecha cierre recepción"], errors="coerce")
     dp_uniq = (
         dp.sort_values("número procedimiento")
         .drop_duplicates(subset="número procedimiento")
         [["número procedimiento", "descripción", "categoría", "tipo procedimiento",
-          "modalidad procedimiento", "nombre unidad compra"]]
+          "modalidad procedimiento", "nombre unidad compra",
+          "fecha_publicacion", "fecha_cierre"]]
         .rename(columns={"número procedimiento": "_proc"})
     )
 
@@ -229,7 +232,27 @@ def prepare_data(tables: dict[str, pd.DataFrame]):
     enriched["monto_total_crc"] = enriched["monto_total_crc"].fillna(0)
     enriched["n_contratos"]     = enriched["n_contratos"].fillna(0).astype(int)
 
-    # ── 5. proveedor‑level amounts (for top‑proveedor ranking) ──
+    # ── 5. vigencia from contratos (contract duration) ──
+    con["vigencia_num"] = pd.to_numeric(con["vigencia contrato"], errors="coerce")
+    con["unidad_vig"]   = con.get("unidad vigencia", pd.Series(dtype="object")).fillna("").str.strip()
+    con["vigencia_dias"] = np.where(
+        con["unidad_vig"].str.lower().str.startswith("año"), con["vigencia_num"] * 365,
+        np.where(con["unidad_vig"].str.lower().str.startswith("mes"), con["vigencia_num"] * 30, np.nan)
+    )
+    vig_proc = (
+        con.groupby("nro procedimiento")
+        .agg(vigencia_dias=("vigencia_dias", "mean"))
+        .reset_index()
+        .rename(columns={"nro procedimiento": "_proc"})
+    )
+    enriched = enriched.merge(vig_proc, left_on="número de procedimiento",
+                              right_on="_proc", how="left").drop(columns=["_proc"], errors="ignore")
+
+    # ── 6. compute plazo columns ──
+    enriched["plazo_proceso_dias"] = (enriched["fecha_adj"] - enriched["fecha_publicacion"]).dt.days
+    enriched["ventana_ofertas_dias"] = (enriched["fecha_cierre"] - enriched["fecha_publicacion"]).dt.days
+
+    # ── 7. proveedor‑level amounts (for top‑proveedor ranking) ──
     op_con = op.merge(
         con[["nro contrato", "cédula proveedor"]],
         left_on="no contrato", right_on="nro contrato", how="left",
@@ -601,6 +624,113 @@ if vista == "Adjudicaciones":
         )
         fig_conc.update_layout(xaxis_tickangle=-45, height=400)
         st.plotly_chart(fig_conc, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── PLAZOS ──
+    st.subheader("⏱️ Análisis de Plazos (en días)")
+    st.caption("Duración del proceso, ventana de ofertas y vigencia contractual")
+
+    plazo_df = proc_summary.copy()
+    has_proceso  = plazo_df["plazo_proceso_dias"].notna() & (plazo_df["plazo_proceso_dias"] > 0)
+    has_ventana  = plazo_df["ventana_ofertas_dias"].notna() & (plazo_df["ventana_ofertas_dias"] > 0)
+    has_vigencia = plazo_df["vigencia_dias"].notna() & (plazo_df["vigencia_dias"] > 0)
+
+    pk1, pk2, pk3 = st.columns(3)
+    pk1.metric("Plazo promedio del proceso",
+               f"{plazo_df.loc[has_proceso, 'plazo_proceso_dias'].mean():.0f} días"
+               if has_proceso.sum() else "—")
+    pk2.metric("Ventana promedio de ofertas",
+               f"{plazo_df.loc[has_ventana, 'ventana_ofertas_dias'].mean():.0f} días"
+               if has_ventana.sum() else "—")
+    pk3.metric("Vigencia promedio del contrato",
+               f"{plazo_df.loc[has_vigencia, 'vigencia_dias'].mean():.0f} días"
+               if has_vigencia.sum() else "—")
+
+    col_p1, col_p2, col_p3 = st.columns(3)
+
+    with col_p1:
+        data_proc = plazo_df.loc[has_proceso, "plazo_proceso_dias"]
+        if len(data_proc) > 0:
+            fig_pp = px.histogram(
+                data_proc, nbins=40,
+                title="Duración del Proceso (días)",
+                labels={"value": "Días", "count": "Procedimientos"},
+                color_discrete_sequence=["#3498db"],
+            )
+            fig_pp.update_layout(showlegend=False, height=350)
+            st.plotly_chart(fig_pp, use_container_width=True)
+        else:
+            st.info("Sin datos de plazo del proceso.")
+
+    with col_p2:
+        data_vent = plazo_df.loc[has_ventana, "ventana_ofertas_dias"]
+        if len(data_vent) > 0:
+            fig_pv = px.histogram(
+                data_vent, nbins=40,
+                title="Ventana de Ofertas (días)",
+                labels={"value": "Días", "count": "Procedimientos"},
+                color_discrete_sequence=["#2ecc71"],
+            )
+            fig_pv.update_layout(showlegend=False, height=350)
+            st.plotly_chart(fig_pv, use_container_width=True)
+        else:
+            st.info("Sin datos de ventana de ofertas.")
+
+    with col_p3:
+        data_vig = plazo_df.loc[has_vigencia, "vigencia_dias"]
+        if len(data_vig) > 0:
+            fig_pvg = px.histogram(
+                data_vig, nbins=40,
+                title="Vigencia del Contrato (días)",
+                labels={"value": "Días", "count": "Procedimientos"},
+                color_discrete_sequence=["#e67e22"],
+            )
+            fig_pvg.update_layout(showlegend=False, height=350)
+            st.plotly_chart(fig_pvg, use_container_width=True)
+        else:
+            st.info("Sin datos de vigencia contractual.")
+
+    plazo_scatter = plazo_df[has_proceso & (plazo_df["monto_total_crc"] > 0)].copy()
+    if len(plazo_scatter) >= 5:
+        fig_ps = px.scatter(
+            plazo_scatter, x="plazo_proceso_dias", y="monto_total_crc",
+            color="tipo procedimiento",
+            hover_data=["número de procedimiento", "descripción"],
+            title="Plazo del Proceso vs Monto Adjudicado",
+            labels={"plazo_proceso_dias": "Plazo del Proceso (días)",
+                    "monto_total_crc": "Monto (₡)"},
+        )
+        fig_ps.update_layout(height=450)
+        st.plotly_chart(fig_ps, use_container_width=True)
+
+    plazo_tipo = plazo_df[has_proceso].copy()
+    if len(plazo_tipo) >= 5:
+        fig_pb = px.box(
+            plazo_tipo, x="tipo procedimiento", y="plazo_proceso_dias",
+            title="Plazo del Proceso por Tipo de Procedimiento",
+            labels={"tipo procedimiento": "", "plazo_proceso_dias": "Días"},
+            color="tipo procedimiento",
+        )
+        fig_pb.update_layout(height=400, showlegend=False, xaxis_tickangle=-30)
+        st.plotly_chart(fig_pb, use_container_width=True)
+
+    plazo_detail = plazo_df[has_proceso | has_ventana | has_vigencia][[
+        "número de procedimiento", "descripción", "tipo procedimiento",
+        "plazo_proceso_dias", "ventana_ofertas_dias", "vigencia_dias",
+        "monto_total_crc",
+    ]].copy()
+    plazo_detail.columns = ["Procedimiento", "Descripción", "Tipo",
+                            "Plazo Proceso (días)", "Ventana Ofertas (días)",
+                            "Vigencia Contrato (días)", "Monto (₡)"]
+    plazo_detail = plazo_detail.sort_values("Plazo Proceso (días)", ascending=False)
+    plazo_detail["Monto (₡)"] = plazo_detail["Monto (₡)"].apply(fmt_crc)
+    plazo_detail.index = range(1, len(plazo_detail) + 1)
+    st.dataframe(plazo_detail, width="stretch", height=400)
+
+    csv_plazo = plazo_detail.to_csv(index=False).encode("utf-8")
+    st.download_button("📥 Descargar plazos (CSV)", csv_plazo,
+                       "plazos_adjudicaciones.csv", "text/csv")
 
     st.markdown("---")
 
