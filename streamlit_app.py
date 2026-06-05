@@ -1567,3 +1567,26 @@ with tab_glosario:
                      "Tipo": st.column_config.TextColumn(width="medium"),
                      "Definición": st.column_config.TextColumn(width="large"),
                  })
+
+    st.markdown("---")
+
+    st.header("💰 Umbrales de Montos por Tipo de Procedimiento")
+    st.markdown("""
+    Montos máximos (en colones) que definen el tipo de procedimiento ordinario
+    aplicable según el año, régimen y tipo de objeto contractual.
+    """)
+
+    umbrales_data = pd.DataFrame([
+        (2025, "Ordinario", "Bienes y Servicios", 64_804_338, 233_449_258, 233_449_258),
+        (2025, "Ordinario", "Obras", 174_473_216, 697_892_648, 697_892_648),
+        (2026, "Ordinario", "Bienes y Servicios", 64_559_795, 258_239_178, 258_239_178),
+    ], columns=["Año", "Régimen", "Tipo Objeto", "Licitación Reducida Hasta (₡)",
+                "Licitación Menor Hasta (₡)", "Licitación Mayor Desde (₡)"])
+
+    st.dataframe(umbrales_data, hide_index=True, use_container_width=True,
+                 column_config={
+                     "Año": st.column_config.NumberColumn(format="%d"),
+                     "Licitación Reducida Hasta (₡)": st.column_config.NumberColumn(format="₡%,.0f"),
+                     "Licitación Menor Hasta (₡)": st.column_config.NumberColumn(format="₡%,.0f"),
+                     "Licitación Mayor Desde (₡)": st.column_config.NumberColumn(format="₡%,.0f"),
+                 })
