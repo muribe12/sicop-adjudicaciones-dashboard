@@ -1543,42 +1543,27 @@ with tab_glosario:
 
     st.markdown("---")
 
-    GLOSSARY = [
+    glossary_data = pd.DataFrame([
         ("Contratación Directa",
-         "Procedimiento utilizado bajo la legislación anterior para adquisiciones de menor "
-         "cuantía o situaciones específicas autorizadas por la normativa. Generalmente "
-         "implicaba una competencia más limitada que las licitaciones públicas."),
+         "Procedimiento utilizado bajo la legislación anterior para adquisiciones de menor cuantía o situaciones específicas autorizadas por la normativa. Generalmente implicaba una competencia más limitada que las licitaciones públicas."),
         ("Licitación Abreviada",
-         "Procedimiento de concurso de la legislación anterior aplicado a contrataciones "
-         "de cuantía intermedia. Requería competencia entre oferentes, pero con requisitos "
-         "y plazos más simplificados que una licitación pública."),
+         "Procedimiento de concurso de la legislación anterior aplicado a contrataciones de cuantía intermedia. Requería competencia entre oferentes, pero con requisitos y plazos más simplificados que una licitación pública."),
         ("Licitación Pública Nacional",
-         "Procedimiento abierto en el que cualquier proveedor que cumpliera los requisitos "
-         "podía presentar oferta. Era el mecanismo utilizado para contrataciones de mayor "
-         "cuantía bajo el régimen anterior."),
+         "Procedimiento abierto en el que cualquier proveedor que cumpliera los requisitos podía presentar oferta. Era el mecanismo utilizado para contrataciones de mayor cuantía bajo el régimen anterior."),
         ("Licitación Mayor",
-         "Procedimiento ordinario de contratación establecido por la LGCP para las "
-         "contrataciones de mayor monto o cuantía inestimable. Tiene los requisitos más "
-         "rigurosos de publicidad, competencia y evaluación."),
+         "Procedimiento ordinario de contratación establecido por la LGCP para las contrataciones de mayor monto o cuantía inestimable. Tiene los requisitos más rigurosos de publicidad, competencia y evaluación."),
         ("Licitación Menor",
-         "Procedimiento ordinario de la LGCP aplicable a contrataciones de monto intermedio. "
-         "Mantiene la competencia entre oferentes pero con plazos y requisitos más ágiles "
-         "que la Licitación Mayor."),
+         "Procedimiento ordinario de la LGCP aplicable a contrataciones de monto intermedio. Mantiene la competencia entre oferentes pero con plazos y requisitos más ágiles que la Licitación Mayor."),
         ("Licitación Reducida",
-         "Procedimiento ordinario de la LGCP para contrataciones de menor cuantía dentro "
-         "del régimen ordinario. Utiliza plazos más cortos y una tramitación simplificada."),
+         "Procedimiento ordinario de la LGCP para contrataciones de menor cuantía dentro del régimen ordinario. Utiliza plazos más cortos y una tramitación simplificada."),
         ("Procedimiento por Excepción",
-         "Contratación que se aparta de los procedimientos ordinarios debido a circunstancias "
-         "expresamente autorizadas por la ley, como exclusividad, urgencia, acuerdos "
-         "internacionales u otros supuestos específicos. Su uso debe justificarse y "
-         "documentarse de forma rigurosa."),
+         "Contratación que se aparta de los procedimientos ordinarios debido a circunstancias expresamente autorizadas por la ley, como exclusividad, urgencia, acuerdos internacionales u otros supuestos específicos. Su uso debe justificarse y documentarse de forma rigurosa."),
         ("Procedimientos Especiales",
-         "Mecanismos de contratación regulados para situaciones particulares que poseen "
-         "reglas propias distintas de los procedimientos ordinarios. Incluyen figuras como "
-         "convenios marco, subastas inversas, remates y otros esquemas previstos por la LGCP."),
-    ]
+         "Mecanismos de contratación regulados para situaciones particulares que poseen reglas propias distintas de los procedimientos ordinarios. Incluyen figuras como convenios marco, subastas inversas, remates y otros esquemas previstos por la LGCP."),
+    ], columns=["Tipo", "Definición"])
 
-    for term, definition in GLOSSARY:
-        st.subheader(term)
-        st.markdown(definition)
-        st.markdown("---")
+    st.dataframe(glossary_data, hide_index=True, use_container_width=True,
+                 column_config={
+                     "Tipo": st.column_config.TextColumn(width="medium"),
+                     "Definición": st.column_config.TextColumn(width="large"),
+                 })
