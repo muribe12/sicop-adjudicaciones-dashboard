@@ -1,5 +1,5 @@
 """
-SICOP Adjudicaciones Dashboard
+Observador de Gasto Público (SICOP)
 Scrutinize the adjudicaciones process across institutions.
 Reads from parquet files (no database required).
 """
@@ -11,8 +11,8 @@ import numpy as np
 from pathlib import Path
 
 st.set_page_config(
-    page_title="Análisis de Adjudicaciones — SICOP",
-    page_icon="🔍",
+    page_title="Observador de Gasto Público (SICOP)",
+    page_icon="🏛️",
     layout="wide",
 )
 
@@ -268,7 +268,7 @@ def prepare_data(tables: dict[str, pd.DataFrame]):
 
 # ── sidebar ───────────────────────────────────────────────────────────────────
 
-st.sidebar.title("🔍 Adjudicaciones SICOP")
+st.sidebar.title("🏛️ Observador de Gasto Público (SICOP)")
 st.sidebar.markdown("---")
 
 sel_inst = st.sidebar.selectbox("Institución", list(INSTITUTIONS.keys()))
@@ -383,11 +383,11 @@ prov_rank["nombre proveedor"] = prov_rank["nombre proveedor"].fillna(
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
 
-st.title(f"📊 Adjudicaciones SICOP — {inst_label}")
-st.caption(f"**{n_procs:,}** procedimientos · {len(df):,} registros de adjudicación")
+st.title("🏛️ Observador de Gasto Público (SICOP)")
+st.caption(f"**{inst_label}** · **{n_procs:,}** procedimientos · {len(df):,} registros de adjudicación")
 
-tab_home, tab_gasto, tab_anomalias, tab_oferentes = st.tabs(
-    ["🏠 Inicio", "💰 Gasto", "🚨 Anomalías", "🔎 Oferentes"]
+tab_home, tab_gasto, tab_anomalias, tab_oferentes, tab_glosario = st.tabs(
+    ["🏠 Inicio", "💰 Gasto", "🚨 Anomalías", "🔎 Oferentes", "📖 Glosario"]
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -395,14 +395,22 @@ tab_home, tab_gasto, tab_anomalias, tab_oferentes = st.tabs(
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab_home:
-    st.header("Bienvenido al Dashboard de Adjudicaciones SICOP")
+    st.header("Bienvenido al Observador de Gasto Público (SICOP)")
     st.markdown(f"""
-    Este dashboard permite analizar los procesos de adjudicación pública de
-    **{inst_label}** registrados en el sistema SICOP (Sistema Integrado de
-    Compras Públicas) de Costa Rica.
+    Plataforma de análisis del gasto público adjudicado a través del sistema
+    **SICOP** (Sistema Integrado de Compras Públicas) de Costa Rica.
 
-    Utilice los **filtros** de la barra lateral para acotar por año, tipo de
-    procedimiento, proveedor, categoría de producto o estado del proceso.
+    ### 🚀 Para comenzar
+    Utilice los filtros de la **barra lateral izquierda** para acotar los datos:
+    1. **Institución** — seleccione la entidad pública a analizar
+    2. **Año(s)** — escoja uno o varios períodos fiscales
+    3. **Tipo de Procedimiento** — filtre por tipo de gasto (Licitación Pública,
+       Contratación Directa, Licitación Abreviada, etc.)
+
+    También puede refinar por proveedor, categoría de producto o estado
+    (adjudicado / desierto).
+
+    > Actualmente visualizando: **{inst_label}**
     """)
 
     st.markdown("---")
@@ -1517,3 +1525,60 @@ with tab_oferentes:
     csv_ofer = prov_agg.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Descargar oferentes (CSV)", csv_ofer,
                        "oferentes_completo.csv", "text/csv")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: GLOSARIO
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_glosario:
+
+    st.header("📖 Glosario de Tipos de Procedimiento")
+    st.markdown("""
+    Referencia rápida de los tipos de procedimiento de contratación pública
+    que aparecen en los datos de SICOP. Se incluyen tanto figuras de la
+    legislación anterior como las establecidas por la **Ley General de
+    Contratación Pública (LGCP)**.
+    """)
+
+    st.markdown("---")
+
+    GLOSSARY = [
+        ("Contratación Directa",
+         "Procedimiento utilizado bajo la legislación anterior para adquisiciones de menor "
+         "cuantía o situaciones específicas autorizadas por la normativa. Generalmente "
+         "implicaba una competencia más limitada que las licitaciones públicas."),
+        ("Licitación Abreviada",
+         "Procedimiento de concurso de la legislación anterior aplicado a contrataciones "
+         "de cuantía intermedia. Requería competencia entre oferentes, pero con requisitos "
+         "y plazos más simplificados que una licitación pública."),
+        ("Licitación Pública Nacional",
+         "Procedimiento abierto en el que cualquier proveedor que cumpliera los requisitos "
+         "podía presentar oferta. Era el mecanismo utilizado para contrataciones de mayor "
+         "cuantía bajo el régimen anterior."),
+        ("Licitación Mayor",
+         "Procedimiento ordinario de contratación establecido por la LGCP para las "
+         "contrataciones de mayor monto o cuantía inestimable. Tiene los requisitos más "
+         "rigurosos de publicidad, competencia y evaluación."),
+        ("Licitación Menor",
+         "Procedimiento ordinario de la LGCP aplicable a contrataciones de monto intermedio. "
+         "Mantiene la competencia entre oferentes pero con plazos y requisitos más ágiles "
+         "que la Licitación Mayor."),
+        ("Licitación Reducida",
+         "Procedimiento ordinario de la LGCP para contrataciones de menor cuantía dentro "
+         "del régimen ordinario. Utiliza plazos más cortos y una tramitación simplificada."),
+        ("Procedimiento por Excepción",
+         "Contratación que se aparta de los procedimientos ordinarios debido a circunstancias "
+         "expresamente autorizadas por la ley, como exclusividad, urgencia, acuerdos "
+         "internacionales u otros supuestos específicos. Su uso debe justificarse y "
+         "documentarse de forma rigurosa."),
+        ("Procedimientos Especiales",
+         "Mecanismos de contratación regulados para situaciones particulares que poseen "
+         "reglas propias distintas de los procedimientos ordinarios. Incluyen figuras como "
+         "convenios marco, subastas inversas, remates y otros esquemas previstos por la LGCP."),
+    ]
+
+    for term, definition in GLOSSARY:
+        st.subheader(term)
+        st.markdown(definition)
+        st.markdown("---")
