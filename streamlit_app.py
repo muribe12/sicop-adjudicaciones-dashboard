@@ -261,6 +261,13 @@ def prepare_data(tables: dict[str, pd.DataFrame]):
     enriched["plazo_proceso_dias"] = (enriched["fecha_adj"] - enriched["fecha_publicacion"]).dt.days
     enriched["ventana_ofertas_dias"] = (enriched["fecha_cierre"] - enriched["fecha_publicacion"]).dt.days
 
+    # ── 6b. annualized amount (monto / (vigencia_dias / 360)) ──
+    enriched["monto_anualizado"] = np.where(
+        enriched["vigencia_dias"] > 0,
+        enriched["monto_total_crc"] / (enriched["vigencia_dias"] / 360),
+        np.nan,
+    )
+
     # ── 7. proveedor‑level amounts (for top‑proveedor ranking) ──
     op_con = op.merge(
         con[["nro contrato", "cédula proveedor"]],
@@ -522,14 +529,15 @@ with tab_gasto:
     top50 = proc_summary[proc_summary["monto_total_crc"] > 0].head(50)
     top50_disp = top50[[
         "número de procedimiento", "descripción", "categoría", "proveedores",
-        "monto_total_crc", "tipo procedimiento", "modalidad procedimiento",
+        "monto_total_crc", "monto_anualizado", "tipo procedimiento", "modalidad procedimiento",
         "fecha_adj", "n_contratos",
     ]].copy()
     top50_disp.columns = [
         "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
-        "Monto (₡)", "Tipo", "Modalidad", "Fecha Adj. Firme", "Contratos",
+        "Monto (₡)", "Monto Anualizado (₡)", "Tipo", "Modalidad", "Fecha Adj. Firme", "Contratos",
     ]
-    top50_disp["Monto (₡)"]       = top50_disp["Monto (₡)"].apply(fmt_crc)
+    top50_disp["Monto (₡)"]            = top50_disp["Monto (₡)"].apply(fmt_crc)
+    top50_disp["Monto Anualizado (₡)"] = top50_disp["Monto Anualizado (₡)"].apply(fmt_crc)
     top50_disp["Fecha Adj. Firme"] = pd.to_datetime(
         top50_disp["Fecha Adj. Firme"], errors="coerce"
     ).dt.strftime("%Y-%m-%d")
@@ -960,16 +968,17 @@ with tab_gasto:
 
     detail = proc_summary[[
         "número de procedimiento", "descripción", "categoría", "proveedores",
-        "monto_total_crc", "tipo procedimiento", "modalidad procedimiento",
+        "monto_total_crc", "monto_anualizado", "tipo procedimiento", "modalidad procedimiento",
         "fecha_adj", "desierto", "permite recursos", "n_contratos",
     ]].copy()
     detail.columns = [
         "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
-        "Monto (₡)", "Tipo", "Modalidad",
+        "Monto (₡)", "Monto Anualizado (₡)", "Tipo", "Modalidad",
         "Fecha Adj. Firme", "Desierto", "Recursos", "Contratos",
     ]
     detail = detail.sort_values("Monto (₡)", ascending=False)
-    detail["Monto (₡)"]       = detail["Monto (₡)"].apply(fmt_crc)
+    detail["Monto (₡)"]            = detail["Monto (₡)"].apply(fmt_crc)
+    detail["Monto Anualizado (₡)"] = detail["Monto Anualizado (₡)"].apply(fmt_crc)
     detail["Fecha Adj. Firme"] = pd.to_datetime(
         detail["Fecha Adj. Firme"], errors="coerce"
     ).dt.strftime("%Y-%m-%d")
