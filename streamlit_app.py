@@ -143,8 +143,8 @@ def categorize_description(desc: str) -> str:
     return "Otros"
 
 INSTITUTIONS = {
-    "Municipalidad de San José (3014042058)": "3014042058",
     "Municipalidad de Montes de Oca (3014042053)": "3014042053",
+    "Municipalidad de San José (3014042058)": "3014042058",
 }
 
 # ── data loading ──────────────────────────────────────────────────────────────
@@ -383,8 +383,8 @@ prov_rank["nombre proveedor"] = prov_rank["nombre proveedor"].fillna(
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
 
-st.title("🏛️ Observador de Gasto Público (SICOP)")
-st.caption(f"**{inst_label}** · **{n_procs:,}** procedimientos · {len(df):,} registros de adjudicación")
+st.title(f"🏛️ Observador de Gasto Público (SICOP) — {inst_label}")
+st.caption(f"**{n_procs:,}** procedimientos · {len(df):,} registros de adjudicación")
 
 tab_home, tab_gasto, tab_anomalias, tab_oferentes, tab_glosario = st.tabs(
     ["🏠 Inicio", "💰 Gasto", "🚨 Anomalías", "🔎 Oferentes", "📖 Glosario"]
