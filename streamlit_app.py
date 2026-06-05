@@ -16,6 +16,15 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown("""
+<style>
+    button[data-baseweb="tab"] > div[data-testid="stMarkdownContainer"] > p {
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 DATA_DIR = Path(__file__).parent / "data"
 
 # ── product category mapping ─────────────────────────────────────────────────
