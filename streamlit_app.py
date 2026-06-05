@@ -369,6 +369,14 @@ vista = st.sidebar.radio("📊 Vista", ["Adjudicaciones", "Análisis de Oferente
 def fmt_crc(v):
     return f"₡{v:,.0f}" if pd.notna(v) and v != 0 else "—"
 
+def monto_col(use_anual: bool) -> str:
+    """Return the column name to use for amounts."""
+    return "monto_anualizado" if use_anual else "monto_total_crc"
+
+def monto_label(use_anual: bool) -> str:
+    """Return the display label for amounts."""
+    return "Monto Anualizado (₡)" if use_anual else "Monto (₡)"
+
 # ── common data prep (shared across tabs) ─────────────────────────────────────
 
 proc_dedup = df.drop_duplicates(subset="número de procedimiento")
@@ -431,9 +439,13 @@ with tab_home:
 
     st.markdown("---")
 
+    anual_home = st.toggle("Mostrar montos anualizados", value=False, key="anual_home")
+    _monto_home = proc_dedup[monto_col(anual_home)].fillna(0)
+    _total_home = _monto_home.sum()
+
     col_h1, col_h2, col_h3, col_h4 = st.columns(4)
     col_h1.metric("Procedimientos", f"{n_procs:,}")
-    col_h2.metric("Monto Total (₡)", fmt_crc(total_monto))
+    col_h2.metric(monto_label(anual_home), fmt_crc(_total_home))
     col_h3.metric("Proveedores", f"{n_prov:,}")
     col_h4.metric("Desiertos", f"{n_desierto:,}")
 
@@ -525,19 +537,20 @@ with tab_gasto:
 
     # ── TOP 50 ──
     st.subheader("💰 Top 50 Adjudicaciones por Monto")
+    anual_top50 = st.toggle("Mostrar montos anualizados", value=False, key="anual_top50")
+    _mc50 = monto_col(anual_top50)
 
-    top50 = proc_summary[proc_summary["monto_total_crc"] > 0].head(50)
+    top50 = proc_summary[proc_summary[_mc50].fillna(0) > 0].sort_values(_mc50, ascending=False).head(50)
     top50_disp = top50[[
         "número de procedimiento", "descripción", "categoría", "proveedores",
-        "monto_total_crc", "monto_anualizado", "tipo procedimiento", "modalidad procedimiento",
+        _mc50, "tipo procedimiento", "modalidad procedimiento",
         "fecha_adj", "n_contratos",
     ]].copy()
     top50_disp.columns = [
         "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
-        "Monto (₡)", "Monto Anualizado (₡)", "Tipo", "Modalidad", "Fecha Adj. Firme", "Contratos",
+        monto_label(anual_top50), "Tipo", "Modalidad", "Fecha Adj. Firme", "Contratos",
     ]
-    top50_disp["Monto (₡)"]            = top50_disp["Monto (₡)"].apply(fmt_crc)
-    top50_disp["Monto Anualizado (₡)"] = top50_disp["Monto Anualizado (₡)"].apply(fmt_crc)
+    top50_disp[monto_label(anual_top50)] = top50_disp[monto_label(anual_top50)].apply(fmt_crc)
     top50_disp["Fecha Adj. Firme"] = pd.to_datetime(
         top50_disp["Fecha Adj. Firme"], errors="coerce"
     ).dt.strftime("%Y-%m-%d")
@@ -550,6 +563,8 @@ with tab_gasto:
 
     # ── TEMPORAL ──
     st.subheader("📈 Análisis Temporal")
+    anual_temporal = st.toggle("Mostrar montos anualizados", value=False, key="anual_temporal")
+    _mc_t = monto_col(anual_temporal)
     col_monthly, col_yearly = st.columns(2)
 
     with col_monthly:
@@ -558,12 +573,12 @@ with tab_gasto:
         monthly = (
             dft.drop_duplicates("número de procedimiento")
             .groupby("mes")
-            .agg(monto=("monto_total_crc", "sum"), n=("monto_total_crc", "count"))
+            .agg(monto=(_mc_t, "sum"), n=(_mc_t, "count"))
             .reset_index()
         )
         fig_m = px.bar(monthly, x="mes", y="monto",
                        title="Monto Adjudicado por Mes",
-                       labels={"mes": "", "monto": "Monto (₡)"})
+                       labels={"mes": "", "monto": monto_label(anual_temporal)})
         fig_m.update_layout(xaxis_tickangle=-45)
         st.plotly_chart(fig_m, use_container_width=True)
 
@@ -586,54 +601,60 @@ with tab_gasto:
 
     # ── TIPO / MODALIDAD ──
     st.subheader("📋 Distribución por Tipo y Modalidad")
+    anual_tipo = st.toggle("Mostrar montos anualizados", value=False, key="anual_tipo")
+    _mc_tp = monto_col(anual_tipo)
+    _ml_tp = monto_label(anual_tipo)
     col_tipo, col_mod = st.columns(2)
 
     with col_tipo:
         tipo_data = (
             proc_summary.groupby("tipo procedimiento")
-            .agg(monto=("monto_total_crc", "sum"), n=("monto_total_crc", "count"))
+            .agg(monto=(_mc_tp, "sum"), n=(_mc_tp, "count"))
             .reset_index().sort_values("monto", ascending=False)
         )
         fig_t = px.pie(tipo_data, names="tipo procedimiento", values="monto",
                        title="Monto por Tipo de Procedimiento")
         st.plotly_chart(fig_t, use_container_width=True)
         tipo_tbl = tipo_data.copy()
-        tipo_tbl.columns = ["Tipo Procedimiento", "Monto (₡)", "Cantidad"]
-        tipo_tbl["Monto (₡)"] = tipo_tbl["Monto (₡)"].apply(fmt_crc)
+        tipo_tbl.columns = ["Tipo Procedimiento", _ml_tp, "Cantidad"]
+        tipo_tbl[_ml_tp] = tipo_tbl[_ml_tp].apply(fmt_crc)
         st.dataframe(tipo_tbl, width="stretch", hide_index=True)
 
     with col_mod:
         mod_data = (
             proc_summary.groupby("modalidad procedimiento")
-            .agg(monto=("monto_total_crc", "sum"), n=("monto_total_crc", "count"))
+            .agg(monto=(_mc_tp, "sum"), n=(_mc_tp, "count"))
             .reset_index().sort_values("monto", ascending=False)
         )
         fig_md = px.bar(mod_data, x="modalidad procedimiento", y="monto",
                         title="Monto por Modalidad",
-                        labels={"modalidad procedimiento": "", "monto": "Monto (₡)"})
+                        labels={"modalidad procedimiento": "", "monto": _ml_tp})
         fig_md.update_layout(xaxis_tickangle=-30)
         st.plotly_chart(fig_md, use_container_width=True)
         mod_tbl = mod_data.copy()
-        mod_tbl.columns = ["Modalidad", "Monto (₡)", "Cantidad"]
-        mod_tbl["Monto (₡)"] = mod_tbl["Monto (₡)"].apply(fmt_crc)
+        mod_tbl.columns = ["Modalidad", _ml_tp, "Cantidad"]
+        mod_tbl[_ml_tp] = mod_tbl[_ml_tp].apply(fmt_crc)
         st.dataframe(mod_tbl, width="stretch", hide_index=True)
 
     st.markdown("---")
 
     # ── CATEGORÍA ──
     st.subheader("🏷️ Distribución por Categoría de Producto")
+    anual_cat = st.toggle("Mostrar montos anualizados", value=False, key="anual_cat")
+    _mc_cat = monto_col(anual_cat)
+    _ml_cat = monto_label(anual_cat)
     col_cat_chart, col_cat_table = st.columns([3, 2])
 
     with col_cat_chart:
         cat_data = (
             proc_summary.groupby("categoría")
-            .agg(monto=("monto_total_crc", "sum"), n=("monto_total_crc", "count"))
+            .agg(monto=(_mc_cat, "sum"), n=(_mc_cat, "count"))
             .reset_index().sort_values("monto", ascending=False)
         )
         fig_cat = px.bar(
             cat_data, y="categoría", x="monto", orientation="h",
             title="Monto por Categoría de Producto",
-            labels={"monto": "Monto (₡)", "categoría": ""},
+            labels={"monto": _ml_cat, "categoría": ""},
             color="monto", color_continuous_scale="Viridis",
         )
         fig_cat.update_layout(
@@ -645,8 +666,8 @@ with tab_gasto:
     with col_cat_table:
         cat_tbl = cat_data.copy()
         cat_tbl["pct"] = (cat_tbl["monto"] / cat_tbl["monto"].sum() * 100).round(1)
-        cat_tbl.columns = ["Categoría", "Monto (₡)", "Procedimientos", "% del Total"]
-        cat_tbl["Monto (₡)"] = cat_tbl["Monto (₡)"].apply(fmt_crc)
+        cat_tbl.columns = ["Categoría", _ml_cat, "Procedimientos", "% del Total"]
+        cat_tbl[_ml_cat] = cat_tbl[_ml_cat].apply(fmt_crc)
         cat_tbl.index = range(1, len(cat_tbl) + 1)
         st.dataframe(cat_tbl, width="stretch", hide_index=True)
         csv_cat = cat_data.to_csv(index=False).encode("utf-8")
@@ -965,20 +986,22 @@ with tab_gasto:
 
     # ── DETALLE COMPLETO ──
     st.subheader("📑 Detalle Completo")
+    anual_detail = st.toggle("Mostrar montos anualizados", value=False, key="anual_detail")
+    _mc_d = monto_col(anual_detail)
+    _ml_d = monto_label(anual_detail)
 
     detail = proc_summary[[
         "número de procedimiento", "descripción", "categoría", "proveedores",
-        "monto_total_crc", "monto_anualizado", "tipo procedimiento", "modalidad procedimiento",
+        _mc_d, "tipo procedimiento", "modalidad procedimiento",
         "fecha_adj", "desierto", "permite recursos", "n_contratos",
     ]].copy()
     detail.columns = [
         "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
-        "Monto (₡)", "Monto Anualizado (₡)", "Tipo", "Modalidad",
+        _ml_d, "Tipo", "Modalidad",
         "Fecha Adj. Firme", "Desierto", "Recursos", "Contratos",
     ]
-    detail = detail.sort_values("Monto (₡)", ascending=False)
-    detail["Monto (₡)"]            = detail["Monto (₡)"].apply(fmt_crc)
-    detail["Monto Anualizado (₡)"] = detail["Monto Anualizado (₡)"].apply(fmt_crc)
+    detail = detail.sort_values(_ml_d, ascending=False)
+    detail[_ml_d] = detail[_ml_d].apply(fmt_crc)
     detail["Fecha Adj. Firme"] = pd.to_datetime(
         detail["Fecha Adj. Firme"], errors="coerce"
     ).dt.strftime("%Y-%m-%d")
@@ -997,15 +1020,18 @@ with tab_gasto:
 with tab_anomalias:
     st.subheader("🚨 Anomalías Detectadas")
     st.caption("Procedimientos con montos estadísticamente atípicos o patrones inusuales")
+    anual_anom = st.toggle("Mostrar montos anualizados", value=False, key="anual_anom")
+    _mc_a = monto_col(anual_anom)
+    _ml_a = monto_label(anual_anom)
 
-    with_amounts = proc_summary[proc_summary["monto_total_crc"] > 0].copy()
+    with_amounts = proc_summary[proc_summary[_mc_a].fillna(0) > 0].copy()
 
     if len(with_amounts) >= 10:
-        mean_amt = with_amounts["monto_total_crc"].mean()
-        std_amt  = with_amounts["monto_total_crc"].std()
+        mean_amt = with_amounts[_mc_a].mean()
+        std_amt  = with_amounts[_mc_a].std()
         threshold_high = mean_amt + 2 * std_amt
 
-        type_stats = with_amounts.groupby("tipo procedimiento")["monto_total_crc"].agg(["mean", "std"]).reset_index()
+        type_stats = with_amounts.groupby("tipo procedimiento")[_mc_a].agg(["mean", "std"]).reset_index()
         type_stats.columns = ["tipo procedimiento", "type_mean", "type_std"]
         with_amounts = with_amounts.merge(type_stats, on="tipo procedimiento", how="left")
         with_amounts["type_std"] = with_amounts["type_std"].fillna(0)
@@ -1013,7 +1039,7 @@ with tab_anomalias:
         flags = []
         for _, row in with_amounts.iterrows():
             reasons = []
-            amt = row["monto_total_crc"]
+            amt = row[_mc_a]
             if amt > threshold_high:
                 reasons.append(f"Monto excede 2σ global (>{fmt_crc(threshold_high)})")
             if row["type_std"] > 0 and amt > row["type_mean"] + 2 * row["type_std"]:
@@ -1023,7 +1049,7 @@ with tab_anomalias:
             flags.append(" | ".join(reasons) if reasons else "")
         with_amounts["anomalía"] = flags
 
-        anomalies = with_amounts[with_amounts["anomalía"] != ""].sort_values("monto_total_crc", ascending=False)
+        anomalies = with_amounts[with_amounts["anomalía"] != ""].sort_values(_mc_a, ascending=False)
 
         col_anom_kpi1, col_anom_kpi2, col_anom_kpi3 = st.columns(3)
         col_anom_kpi1.metric("Anomalías detectadas", f"{len(anomalies):,}")
@@ -1032,12 +1058,12 @@ with tab_anomalias:
 
         with_amounts["es_anomalía"] = with_amounts["anomalía"] != ""
         fig_anom = px.scatter(
-            with_amounts, x="fecha_adj", y="monto_total_crc",
+            with_amounts, x="fecha_adj", y=_mc_a,
             color="es_anomalía",
             color_discrete_map={True: "#e74c3c", False: "#95a5a6"},
             hover_data=["número de procedimiento", "descripción", "proveedores"],
-            title="Monto por Procedimiento (anomalías en rojo)",
-            labels={"fecha_adj": "Fecha", "monto_total_crc": "Monto (₡)",
+            title=f"{'Monto Anualizado' if anual_anom else 'Monto'} por Procedimiento (anomalías en rojo)",
+            labels={"fecha_adj": "Fecha", _mc_a: _ml_a,
                     "es_anomalía": "Anomalía"},
         )
         fig_anom.add_hline(y=threshold_high, line_dash="dash", line_color="red",
@@ -1050,21 +1076,21 @@ with tab_anomalias:
         if len(anomalies) > 0:
             anom_disp = anomalies[[
                 "número de procedimiento", "descripción", "proveedores",
-                "monto_total_crc", "tipo procedimiento", "fecha_adj",
+                _mc_a, "tipo procedimiento", "fecha_adj",
                 "vigencia_dias", "anomalía",
             ]].copy()
             anom_disp.columns = ["Procedimiento", "Descripción", "Proveedor(es)",
-                                 "Monto (₡)", "Tipo", "Fecha",
+                                 _ml_a, "Tipo", "Fecha",
                                  "Vigencia Contrato (días)", "Razón"]
+            anom_disp[_ml_a] = anom_disp[_ml_a].apply(fmt_crc)
             anom_disp["Monto/Día (₡)"] = np.where(
                 anom_disp["Vigencia Contrato (días)"].notna() & (anom_disp["Vigencia Contrato (días)"] > 0),
-                anomalies["monto_total_crc"] / anom_disp["Vigencia Contrato (días)"],
+                anomalies[_mc_a] / anom_disp["Vigencia Contrato (días)"],
                 np.nan,
             )
             anom_disp["Monto/Día (₡)"] = anom_disp["Monto/Día (₡)"].apply(
                 lambda v: fmt_crc(v) if pd.notna(v) else "—"
             )
-            anom_disp["Monto (₡)"] = anom_disp["Monto (₡)"].apply(fmt_crc)
             anom_disp["Fecha"] = pd.to_datetime(anom_disp["Fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
             anom_disp.index = range(1, len(anom_disp) + 1)
             st.dataframe(anom_disp, width="stretch", height=500)
