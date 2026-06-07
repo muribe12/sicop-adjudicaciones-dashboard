@@ -18,9 +18,43 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    button[data-baseweb="tab"] > div[data-testid="stMarkdownContainer"] > p {
-        font-size: 1.1rem;
-        font-weight: 600;
+    /* Tab labels — broad selectors for compatibility */
+    button[data-baseweb="tab"] p,
+    button[data-baseweb="tab"] span,
+    button[data-baseweb="tab"] {
+        font-size: 1.3rem !important;
+        font-weight: 700 !important;
+    }
+    button[data-baseweb="tab"] {
+        padding: 0.6rem 1.2rem !important;
+        color: #1a1a2e !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #0068c9 !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] p,
+    button[data-baseweb="tab"][aria-selected="true"] span {
+        color: #0068c9 !important;
+    }
+    /* Streamlit >=1.37 uses stTabs */
+    .stTabs [data-baseweb="tab-list"] button p,
+    .stTabs [data-baseweb="tab-list"] button span,
+    .stTabs [data-baseweb="tab-list"] button div {
+        font-size: 1.3rem !important;
+        font-weight: 700 !important;
+    }
+    .stTabs [data-baseweb="tab-list"] button {
+        padding: 0.6rem 1.2rem !important;
+    }
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] p,
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] span,
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] div {
+        color: #0068c9 !important;
+    }
+    /* Sidebar filter labels */
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label {
+        font-weight: 700 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -304,7 +338,8 @@ else:
 
 # tipo procedimiento
 tipos = sorted(enriched["tipo procedimiento"].dropna().unique())
-sel_tipos = st.sidebar.multiselect("Tipo de Procedimiento", tipos, default=tipos)
+sel_tipos = st.sidebar.multiselect("Tipo de Procedimiento", tipos,
+                                    placeholder="Todos")
 
 # proveedor filter
 all_proveedores = sorted(
@@ -318,7 +353,7 @@ sel_proveedores = st.sidebar.multiselect("Proveedor(es)", all_proveedores,
 # categoría filter
 categorias = sorted(enriched["categoría"].dropna().unique())
 sel_categorias = st.sidebar.multiselect("Categoría de Producto", categorias,
-                                         default=categorias)
+                                         placeholder="Todos")
 
 # desierto
 estado_opt = st.sidebar.radio("Estado", ["Todos", "Solo adjudicados", "Solo desiertos"])
@@ -329,7 +364,8 @@ df = enriched.copy()
 if sel_years:
     df = df[df["fecha_adj"].dt.year.isin(sel_years) | df["fecha_adj"].isna()]
 
-df = df[df["tipo procedimiento"].isin(sel_tipos) | df["tipo procedimiento"].isna()]
+if sel_tipos:
+    df = df[df["tipo procedimiento"].isin(sel_tipos) | df["tipo procedimiento"].isna()]
 
 if sel_proveedores:
     mask = df["proveedores"].fillna("").apply(
@@ -337,7 +373,8 @@ if sel_proveedores:
     )
     df = df[mask]
 
-df = df[df["categoría"].isin(sel_categorias) | df["categoría"].isna()]
+if sel_categorias:
+    df = df[df["categoría"].isin(sel_categorias) | df["categoría"].isna()]
 
 if estado_opt == "Solo adjudicados":
     df = df[df["desierto"].str.upper() == "N"]
@@ -499,70 +536,9 @@ with tab_home:
 
 with tab_gasto:
 
-    # ── TOP PROVEEDORES ──
-    st.subheader("🏆 Top Proveedores por Monto Adjudicado")
-
-    top_n = st.slider("Proveedores a mostrar", 10, 50, 25, key="prov_slider")
-    top_prov = prov_rank.head(top_n).copy()
-
-    col_chart, col_table = st.columns([3, 2])
-    with col_chart:
-        fig_prov = px.bar(
-            top_prov, y="nombre proveedor", x="monto_total", orientation="h",
-            title=f"Top {top_n} Proveedores (₡)",
-            labels={"monto_total": "Monto (₡)", "nombre proveedor": ""},
-            color="monto_total", color_continuous_scale="Blues",
-        )
-        fig_prov.update_layout(
-            yaxis={"categoryorder": "total ascending"},
-            height=max(450, top_n * 28), coloraxis_showscale=False,
-        )
-        st.plotly_chart(fig_prov, use_container_width=True)
-
-    with col_table:
-        tbl_prov = top_prov[["nombre proveedor", "cédula proveedor", "monto_total",
-                              "ordenes", "tipo proveedor", "tamaño proveedor",
-                              "provincia"]].copy()
-        tbl_prov.columns = ["Proveedor", "Cédula", "Monto Total (₡)", "Órdenes",
-                             "Tipo", "Tamaño", "Provincia"]
-        tbl_prov["Monto Total (₡)"] = tbl_prov["Monto Total (₡)"].apply(fmt_crc)
-        tbl_prov.index = range(1, len(tbl_prov) + 1)
-        st.dataframe(tbl_prov, width="stretch", height=max(450, top_n * 28))
-
-        csv_prov = prov_rank.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Descargar lista completa proveedores",
-                           csv_prov, "proveedores_por_monto.csv", "text/csv")
-
-    st.markdown("---")
-
-    # ── TOP 50 ──
-    st.subheader("💰 Top 50 Adjudicaciones por Monto")
-    anual_top50 = st.toggle("Mostrar montos anualizados", value=False, key="anual_top50")
-    _mc50 = monto_col(anual_top50)
-
-    top50 = proc_summary[proc_summary[_mc50].fillna(0) > 0].sort_values(_mc50, ascending=False).head(50)
-    top50_disp = top50[[
-        "número de procedimiento", "descripción", "categoría", "proveedores",
-        _mc50, "tipo procedimiento", "modalidad procedimiento",
-        "fecha_adj", "n_contratos",
-    ]].copy()
-    top50_disp.columns = [
-        "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
-        monto_label(anual_top50), "Tipo", "Modalidad", "Fecha Adj. Firme", "Contratos",
-    ]
-    top50_disp[monto_label(anual_top50)] = top50_disp[monto_label(anual_top50)].apply(fmt_crc)
-    top50_disp["Fecha Adj. Firme"] = pd.to_datetime(
-        top50_disp["Fecha Adj. Firme"], errors="coerce"
-    ).dt.strftime("%Y-%m-%d")
-    top50_disp.index = range(1, len(top50_disp) + 1)
-    st.dataframe(top50_disp, width="stretch", height=1200)
-    csv50 = top50_disp.to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Descargar Top 50 (CSV)", csv50,
-                       "top50_adjudicaciones.csv", "text/csv")
-    st.markdown("---")
-
     # ── TEMPORAL ──
     st.subheader("📈 Análisis Temporal")
+    st.caption("Evolución del gasto adjudicado por mes y cantidad de procedimientos por año")
     anual_temporal = st.toggle("Mostrar montos anualizados", value=False, key="anual_temporal")
     _mc_t = monto_col(anual_temporal)
     col_monthly, col_yearly = st.columns(2)
@@ -600,46 +576,33 @@ with tab_gasto:
     st.markdown("---")
 
     # ── TIPO / MODALIDAD ──
-    st.subheader("📋 Distribución por Tipo y Modalidad")
+    st.subheader("📋 Distribución por Tipo de Procedimiento")
+    st.caption("Composición del gasto según el tipo de contratación")
     anual_tipo = st.toggle("Mostrar montos anualizados", value=False, key="anual_tipo")
     _mc_tp = monto_col(anual_tipo)
     _ml_tp = monto_label(anual_tipo)
-    col_tipo, col_mod = st.columns(2)
 
-    with col_tipo:
-        tipo_data = (
-            proc_summary.groupby("tipo procedimiento")
-            .agg(monto=(_mc_tp, "sum"), n=(_mc_tp, "count"))
-            .reset_index().sort_values("monto", ascending=False)
-        )
+    tipo_data = (
+        proc_summary.groupby("tipo procedimiento")
+        .agg(monto=(_mc_tp, "sum"), n=(_mc_tp, "count"))
+        .reset_index().sort_values("monto", ascending=False)
+    )
+    col_tipo_chart, col_tipo_table = st.columns([3, 2])
+    with col_tipo_chart:
         fig_t = px.pie(tipo_data, names="tipo procedimiento", values="monto",
                        title="Monto por Tipo de Procedimiento")
         st.plotly_chart(fig_t, use_container_width=True)
+    with col_tipo_table:
         tipo_tbl = tipo_data.copy()
         tipo_tbl.columns = ["Tipo Procedimiento", _ml_tp, "Cantidad"]
         tipo_tbl[_ml_tp] = tipo_tbl[_ml_tp].apply(fmt_crc)
         st.dataframe(tipo_tbl, width="stretch", hide_index=True)
 
-    with col_mod:
-        mod_data = (
-            proc_summary.groupby("modalidad procedimiento")
-            .agg(monto=(_mc_tp, "sum"), n=(_mc_tp, "count"))
-            .reset_index().sort_values("monto", ascending=False)
-        )
-        fig_md = px.bar(mod_data, x="modalidad procedimiento", y="monto",
-                        title="Monto por Modalidad",
-                        labels={"modalidad procedimiento": "", "monto": _ml_tp})
-        fig_md.update_layout(xaxis_tickangle=-30)
-        st.plotly_chart(fig_md, use_container_width=True)
-        mod_tbl = mod_data.copy()
-        mod_tbl.columns = ["Modalidad", _ml_tp, "Cantidad"]
-        mod_tbl[_ml_tp] = mod_tbl[_ml_tp].apply(fmt_crc)
-        st.dataframe(mod_tbl, width="stretch", hide_index=True)
-
     st.markdown("---")
 
     # ── CATEGORÍA ──
     st.subheader("🏷️ Distribución por Categoría de Producto")
+    st.caption("Clasificación automática del gasto por categoría de bien o servicio")
     anual_cat = st.toggle("Mostrar montos anualizados", value=False, key="anual_cat")
     _mc_cat = monto_col(anual_cat)
     _ml_cat = monto_label(anual_cat)
@@ -651,12 +614,16 @@ with tab_gasto:
             .agg(monto=(_mc_cat, "sum"), n=(_mc_cat, "count"))
             .reset_index().sort_values("monto", ascending=False)
         )
+        cat_data["pct"] = (cat_data["monto"] / cat_data["monto"].sum() * 100).round(1)
+        cat_data["pct_label"] = cat_data["pct"].apply(lambda x: f"{x:.1f}%")
         fig_cat = px.bar(
             cat_data, y="categoría", x="monto", orientation="h",
             title="Monto por Categoría de Producto",
             labels={"monto": _ml_cat, "categoría": ""},
             color="monto", color_continuous_scale="Viridis",
+            text="pct_label",
         )
+        fig_cat.update_traces(textposition="outside", textfont_size=11)
         fig_cat.update_layout(
             yaxis={"categoryorder": "total ascending"},
             height=max(400, len(cat_data) * 35), coloraxis_showscale=False,
@@ -664,7 +631,7 @@ with tab_gasto:
         st.plotly_chart(fig_cat, use_container_width=True)
 
     with col_cat_table:
-        cat_tbl = cat_data.copy()
+        cat_tbl = cat_data[["categoría", "monto", "n"]].copy()
         cat_tbl["pct"] = (cat_tbl["monto"] / cat_tbl["monto"].sum() * 100).round(1)
         cat_tbl.columns = ["Categoría", _ml_cat, "Procedimientos", "% del Total"]
         cat_tbl[_ml_cat] = cat_tbl[_ml_cat].apply(fmt_crc)
@@ -676,42 +643,46 @@ with tab_gasto:
 
     st.markdown("---")
 
-    # ── RECURSOS ──
-    st.subheader("⚖️ Análisis de Recursos (Apelaciones)")
-    col_rec_pie, col_rec_year = st.columns(2)
+    # ── TOP PROVEEDORES ──
+    st.subheader("🏆 Top Proveedores por Monto Adjudicado")
+    st.caption("Proveedores con mayor monto total adjudicado en el período seleccionado")
 
-    with col_rec_pie:
-        rec = proc_summary.copy()
-        rec["permite"] = rec["permite recursos"].fillna("Sin dato").str.strip()
-        rec["permite"] = rec["permite"].replace({"": "Sin dato"})
-        rec_cnt = rec["permite"].value_counts().reset_index()
-        rec_cnt.columns = ["Permite Recursos", "Cantidad"]
-        fig_rec = px.pie(
-            rec_cnt, names="Permite Recursos", values="Cantidad",
-            title="¿Permite Recursos?", color="Permite Recursos",
-            color_discrete_map={"Si": "#e67e22", "No": "#2ecc71", "Sin dato": "#95a5a6"},
-        )
-        st.plotly_chart(fig_rec, use_container_width=True)
+    top_n = st.slider("Proveedores a mostrar", 10, 50, 25, key="prov_slider")
+    top_prov = prov_rank.head(top_n).copy()
 
-    with col_rec_year:
-        rec_y = df[df["fecha_adj"].notna()].copy()
-        rec_y["año"] = rec_y["fecha_adj"].dt.year.astype(int)
-        rec_y["permite"] = rec_y["permite recursos"].fillna("Sin dato").str.strip()
-        rec_y["permite"] = rec_y["permite"].replace({"": "Sin dato"})
-        rec_yearly = (
-            rec_y.drop_duplicates("número de procedimiento")
-            .groupby(["año", "permite"]).size().reset_index(name="n")
+    col_chart, col_table = st.columns([3, 2])
+    with col_chart:
+        fig_prov = px.bar(
+            top_prov, y="nombre proveedor", x="monto_total", orientation="h",
+            title=f"Top {top_n} Proveedores (₡)",
+            labels={"monto_total": "Monto (₡)", "nombre proveedor": ""},
+            color="monto_total", color_continuous_scale="Blues",
         )
-        fig_ry = px.bar(rec_yearly, x="año", y="n", color="permite",
-                        title="Permite Recursos por Año", barmode="stack",
-                        color_discrete_map={"Si": "#e67e22", "No": "#2ecc71", "Sin dato": "#95a5a6"},
-                        labels={"año": "", "n": "Procedimientos", "permite": "Permite Recursos"})
-        st.plotly_chart(fig_ry, use_container_width=True)
+        fig_prov.update_layout(
+            yaxis={"categoryorder": "total ascending"},
+            height=max(450, top_n * 28), coloraxis_showscale=False,
+        )
+        st.plotly_chart(fig_prov, use_container_width=True)
+
+    with col_table:
+        tbl_prov = top_prov[["nombre proveedor", "cédula proveedor", "monto_total",
+                              "ordenes", "tipo proveedor", "tamaño proveedor",
+                              "provincia"]].copy()
+        tbl_prov.columns = ["Proveedor", "Cédula", "Monto Total (₡)", "Órdenes",
+                             "Tipo", "Tamaño", "Provincia"]
+        tbl_prov["Monto Total (₡)"] = tbl_prov["Monto Total (₡)"].apply(fmt_crc)
+        tbl_prov.index = range(1, len(tbl_prov) + 1)
+        st.dataframe(tbl_prov, width="stretch", height=max(450, top_n * 28))
+
+        csv_prov = prov_rank.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Descargar lista completa proveedores",
+                           csv_prov, "proveedores_por_monto.csv", "text/csv")
 
     st.markdown("---")
 
     # ── CONCENTRACIÓN ──
     st.subheader("🔬 Concentración del Gasto")
+    st.caption("Distribución del gasto entre proveedores y nivel de concentración en los principales")
     if len(prov_rank) >= 2:
         prov_rank_all = prov_rank.copy()
         prov_rank_all["pct"] = prov_rank_all["monto_total"] / prov_rank_all["monto_total"].sum() * 100
@@ -843,149 +814,125 @@ with tab_gasto:
 
     st.markdown("---")
 
-    # ── EXPLOSIÓN DE CATEGORÍAS ──
-    st.subheader("🔥 Explosión de Categorías")
-    st.caption("Categorías cuyo gasto ha crecido más rápidamente entre períodos")
+    # ── ADJUDICACIONES MÁS RÁPIDAS QUE EL PROMEDIO ──
+    st.subheader("⚡ Adjudicaciones Más Rápidas que el Promedio por Tipo")
+    st.caption("Procedimientos cuyo plazo fue inferior al promedio de su tipo de procedimiento")
 
-    cat_time = proc_summary[
-        proc_summary["fecha_adj"].notna()
-        & proc_summary["categoría"].notna()
-        & (proc_summary["categoría"] != "Sin categoría")
+    rapidas_df = proc_summary[
+        proc_summary["plazo_proceso_dias"].notna()
+        & (proc_summary["plazo_proceso_dias"] > 0)
         & (proc_summary["monto_total_crc"] > 0)
     ].copy()
-    cat_time["año"] = cat_time["fecha_adj"].dt.year
 
-    cat_years = sorted(cat_time["año"].unique())
-    if len(cat_years) >= 2:
-        cat_yr = (
-            cat_time.groupby(["categoría", "año"])
-            .agg(monto=("monto_total_crc", "sum"), n_procs=("número de procedimiento", "nunique"))
+    if len(rapidas_df) >= 5:
+        tipo_avg = (
+            rapidas_df.groupby("tipo procedimiento")["plazo_proceso_dias"]
+            .agg(promedio="mean", mediana="median", n="count")
             .reset_index()
         )
-
-        fig_cat_evo = px.line(
-            cat_yr, x="año", y="monto", color="categoría",
-            markers=True,
-            title="Evolución del Gasto por Categoría",
-            labels={"año": "Año", "monto": "Monto (₡)", "categoría": "Categoría"},
+        rapidas_df = rapidas_df.merge(
+            tipo_avg[["tipo procedimiento", "promedio"]],
+            on="tipo procedimiento", how="left",
         )
-        fig_cat_evo.update_layout(height=450, xaxis=dict(dtick=1))
-        st.plotly_chart(fig_cat_evo, use_container_width=True)
+        rapidas_df["días_bajo_promedio"] = rapidas_df["promedio"] - rapidas_df["plazo_proceso_dias"]
+        rapidas_df["pct_bajo_promedio"] = (
+            (rapidas_df["días_bajo_promedio"] / rapidas_df["promedio"]) * 100
+        ).round(1)
 
-        last_yr = cat_years[-1]
-        prev_yr = cat_years[-2]
-
-        cat_last = cat_yr[cat_yr["año"] == last_yr].set_index("categoría")
-        cat_prev = cat_yr[cat_yr["año"] == prev_yr].set_index("categoría")
-
-        cat_growth = cat_last[["monto", "n_procs"]].join(
-            cat_prev[["monto", "n_procs"]], lsuffix=f"_{last_yr}", rsuffix=f"_{prev_yr}",
-            how="outer",
-        ).fillna(0)
-        cat_growth[f"monto_{last_yr}"] = cat_growth[f"monto_{last_yr}"].astype(float)
-        cat_growth[f"monto_{prev_yr}"] = cat_growth[f"monto_{prev_yr}"].astype(float)
-
-        cat_growth["crecimiento_pct"] = np.where(
-            cat_growth[f"monto_{prev_yr}"] > 0,
-            ((cat_growth[f"monto_{last_yr}"] - cat_growth[f"monto_{prev_yr}"])
-             / cat_growth[f"monto_{prev_yr}"] * 100),
-            np.where(cat_growth[f"monto_{last_yr}"] > 0, 999.9, 0),
-        )
-        cat_growth["cambio_abs"] = cat_growth[f"monto_{last_yr}"] - cat_growth[f"monto_{prev_yr}"]
-        cat_growth = cat_growth.sort_values("crecimiento_pct", ascending=False).reset_index()
-
-        median_monto = cat_growth[f"monto_{last_yr}"].median()
-        cat_growth["explosión"] = (
-            (cat_growth["crecimiento_pct"] > 100) |
-            ((cat_growth[f"monto_{prev_yr}"] == 0)
-             & (cat_growth[f"monto_{last_yr}"] > median_monto))
+        rapidas = rapidas_df[rapidas_df["días_bajo_promedio"] > 0].sort_values(
+            "pct_bajo_promedio", ascending=False
         )
 
-        n_explosions = cat_growth["explosión"].sum()
-        max_growth = cat_growth["crecimiento_pct"].max()
-        max_change = cat_growth["cambio_abs"].max()
+        rk1, rk2, rk3 = st.columns(3)
+        rk1.metric("Más rápidas que promedio", f"{len(rapidas):,} de {len(rapidas_df):,}")
+        rk2.metric("% más rápidas", f"{len(rapidas)/len(rapidas_df)*100:.1f}%")
+        rk3.metric("Ahorro promedio de días",
+                    f"{rapidas['días_bajo_promedio'].mean():.0f} días" if len(rapidas) else "—")
 
-        ek1, ek2, ek3 = st.columns(3)
-        ek1.metric("Categorías con explosión de gasto", f"{n_explosions}")
-        ek2.metric("Mayor crecimiento", f"{max_growth:+,.1f}%" if max_growth < 999.9
-                   else "Nueva categoría")
-        ek3.metric("Mayor incremento absoluto", fmt_crc(max_change))
+        st.markdown("##### Promedio de plazo por tipo de procedimiento")
+        avg_disp = tipo_avg.copy()
+        avg_disp.columns = ["Tipo Procedimiento", "Promedio (días)", "Mediana (días)", "Procedimientos"]
+        avg_disp["Promedio (días)"] = avg_disp["Promedio (días)"].round(1)
+        avg_disp["Mediana (días)"] = avg_disp["Mediana (días)"].round(1)
+        st.dataframe(avg_disp, hide_index=True, use_container_width=True)
 
-        fig_cat_growth = px.bar(
-            cat_growth.sort_values("crecimiento_pct", ascending=True),
-            x="crecimiento_pct", y="categoría",
-            color="explosión",
-            color_discrete_map={True: "#e74c3c", False: "#3498db"},
-            hover_data=[f"monto_{prev_yr}", f"monto_{last_yr}", "cambio_abs",
-                        f"n_procs_{last_yr}", f"n_procs_{prev_yr}"],
-            title=f"Crecimiento del Gasto por Categoría: {prev_yr} → {last_yr}",
-            labels={
-                "crecimiento_pct": "Crecimiento (%)",
-                "categoría": "",
-                "explosión": "Explosión (>100%)",
-                f"monto_{prev_yr}": f"Monto {prev_yr} (₡)",
-                f"monto_{last_yr}": f"Monto {last_yr} (₡)",
-                "cambio_abs": "Cambio Absoluto (₡)",
-                f"n_procs_{last_yr}": f"# Procs {last_yr}",
-                f"n_procs_{prev_yr}": f"# Procs {prev_yr}",
-            },
-            orientation="h",
-        )
-        fig_cat_growth.add_vline(x=100, line_dash="dash", line_color="red",
-                                 annotation_text="Umbral 100%")
-        fig_cat_growth.add_vline(x=0, line_dash="dot", line_color="gray")
-        fig_cat_growth.update_layout(height=max(400, len(cat_growth) * 35), showlegend=True)
-        st.plotly_chart(fig_cat_growth, use_container_width=True)
+        if len(rapidas) > 0:
+            st.markdown("##### Ranking de adjudicaciones más rápidas")
+            anual_rapidas = st.toggle("Mostrar montos anualizados", value=False, key="anual_rapidas")
+            _mc_r = monto_col(anual_rapidas)
+            _ml_r = monto_label(anual_rapidas)
 
-        fig_cat_scatter = px.scatter(
-            cat_growth, x="crecimiento_pct", y="cambio_abs",
-            size=f"monto_{last_yr}", color="explosión",
-            color_discrete_map={True: "#e74c3c", False: "#95a5a6"},
-            hover_data=["categoría", f"monto_{prev_yr}", f"monto_{last_yr}"],
-            title=f"Crecimiento % vs Incremento Absoluto ({prev_yr} → {last_yr})",
-            labels={
-                "crecimiento_pct": "Crecimiento (%)",
-                "cambio_abs": "Cambio Absoluto (₡)",
-                f"monto_{last_yr}": f"Monto {last_yr} (₡)",
-                "explosión": "Explosión",
-            },
-            text="categoría",
-        )
-        fig_cat_scatter.update_traces(textposition="top center", textfont_size=9,
-                                      marker=dict(sizemin=5))
-        fig_cat_scatter.add_vline(x=100, line_dash="dash", line_color="red",
-                                  annotation_text="100%")
-        fig_cat_scatter.add_hline(y=0, line_dash="dot", line_color="gray")
-        fig_cat_scatter.update_layout(height=500, showlegend=True)
-        st.plotly_chart(fig_cat_scatter, use_container_width=True)
+            rapidas_disp = rapidas[[
+                "número de procedimiento", "descripción", "tipo procedimiento",
+                "plazo_proceso_dias", "promedio", "días_bajo_promedio",
+                "pct_bajo_promedio", _mc_r, "proveedores",
+            ]].head(50).copy()
+            rapidas_disp.columns = [
+                "Procedimiento", "Descripción", "Tipo",
+                "Plazo (días)", "Promedio Tipo (días)", "Días Bajo Promedio",
+                "% Más Rápido", _ml_r, "Proveedor(es)",
+            ]
+            rapidas_disp["Promedio Tipo (días)"] = rapidas_disp["Promedio Tipo (días)"].round(1)
+            rapidas_disp[_ml_r] = rapidas_disp[_ml_r].apply(fmt_crc)
+            rapidas_disp.index = range(1, len(rapidas_disp) + 1)
+            st.dataframe(rapidas_disp, width="stretch", height=600)
 
-        cat_tbl = cat_growth[[
-            "categoría", f"monto_{prev_yr}", f"monto_{last_yr}",
-            "cambio_abs", "crecimiento_pct",
-            f"n_procs_{prev_yr}", f"n_procs_{last_yr}", "explosión",
-        ]].copy()
-        cat_tbl.columns = [
-            "Categoría", f"Monto {prev_yr} (₡)", f"Monto {last_yr} (₡)",
-            "Cambio Absoluto (₡)", "Crecimiento (%)",
-            f"# Procs {prev_yr}", f"# Procs {last_yr}", "Explosión",
-        ]
-        cat_tbl[f"Monto {prev_yr} (₡)"] = cat_tbl[f"Monto {prev_yr} (₡)"].apply(fmt_crc)
-        cat_tbl[f"Monto {last_yr} (₡)"] = cat_tbl[f"Monto {last_yr} (₡)"].apply(fmt_crc)
-        cat_tbl["Cambio Absoluto (₡)"] = cat_tbl["Cambio Absoluto (₡)"].apply(fmt_crc)
-        cat_tbl["Explosión"] = cat_tbl["Explosión"].map({True: "🔥 Sí", False: ""})
-        cat_tbl.index = range(1, len(cat_tbl) + 1)
-        st.dataframe(cat_tbl, width="stretch", height=400)
+            csv_rapidas = rapidas_disp.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Descargar ranking rápidas (CSV)", csv_rapidas,
+                               "adjudicaciones_rapidas_ranking.csv", "text/csv")
 
-        csv_cat_exp = cat_tbl.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Descargar explosión de categorías (CSV)", csv_cat_exp,
-                           "explosion_categorias.csv", "text/csv")
+            fig_rapidas = px.scatter(
+                rapidas.head(100),
+                x="plazo_proceso_dias", y=_mc_r,
+                color="tipo procedimiento",
+                size="pct_bajo_promedio",
+                hover_data=["número de procedimiento", "descripción",
+                            "días_bajo_promedio", "proveedores"],
+                title="Plazo vs Monto — Adjudicaciones Más Rápidas que el Promedio",
+                labels={
+                    "plazo_proceso_dias": "Plazo (días)",
+                    _mc_r: _ml_r,
+                    "tipo procedimiento": "Tipo",
+                    "pct_bajo_promedio": "% Más Rápido",
+                },
+            )
+            fig_rapidas.update_layout(height=500)
+            st.plotly_chart(fig_rapidas, use_container_width=True)
     else:
-        st.info("Se requieren al menos 2 años de datos para analizar explosión de categorías.")
+        st.info("Datos insuficientes de plazos para este análisis.")
 
+    st.markdown("---")
+
+    # ── TOP 50 ──
+    st.subheader("💰 Top 50 Adjudicaciones por Monto")
+    st.caption("Los 50 procedimientos con mayor monto adjudicado")
+    anual_top50 = st.toggle("Mostrar montos anualizados", value=False, key="anual_top50")
+    _mc50 = monto_col(anual_top50)
+
+    top50 = proc_summary[proc_summary[_mc50].fillna(0) > 0].sort_values(_mc50, ascending=False).head(50)
+    top50_disp = top50[[
+        "número de procedimiento", "descripción", "categoría", "proveedores",
+        _mc50, "tipo procedimiento", "modalidad procedimiento",
+        "fecha_adj", "n_contratos",
+    ]].copy()
+    top50_disp.columns = [
+        "Procedimiento", "Descripción", "Categoría", "Proveedor(es)",
+        monto_label(anual_top50), "Tipo", "Modalidad", "Fecha Adj. Firme", "Contratos",
+    ]
+    top50_disp[monto_label(anual_top50)] = top50_disp[monto_label(anual_top50)].apply(fmt_crc)
+    top50_disp["Fecha Adj. Firme"] = pd.to_datetime(
+        top50_disp["Fecha Adj. Firme"], errors="coerce"
+    ).dt.strftime("%Y-%m-%d")
+    top50_disp.index = range(1, len(top50_disp) + 1)
+    st.dataframe(top50_disp, width="stretch", height=1200)
+    csv50 = top50_disp.to_csv(index=False).encode("utf-8")
+    st.download_button("📥 Descargar Top 50 (CSV)", csv50,
+                       "top50_adjudicaciones.csv", "text/csv")
     st.markdown("---")
 
     # ── DETALLE COMPLETO ──
     st.subheader("📑 Detalle Completo")
+    st.caption("Tabla con todos los procedimientos y sus datos principales, exportable a CSV")
     anual_detail = st.toggle("Mostrar montos anualizados", value=False, key="anual_detail")
     _mc_d = monto_col(anual_detail)
     _ml_d = monto_label(anual_detail)
@@ -1402,6 +1349,7 @@ with tab_oferentes:
 
     # ── 1. TREEMAP ──
     st.subheader("🗺️ Gasto por Oferente y Categoría")
+    st.caption("Mapa de calor del gasto distribuido entre oferentes y categorías de producto")
     treemap_data = prov_cat[prov_cat["monto"] > 0].copy()
     treemap_top = treemap_data.sort_values("monto", ascending=False).head(100)
 
@@ -1416,6 +1364,7 @@ with tab_oferentes:
 
     # ── 2. TOP OFERENTES POR CATEGORÍA ──
     st.subheader("🏅 Top Oferentes por Categoría")
+    st.caption("Los 5 proveedores con mayor monto adjudicado en cada categoría de producto")
     cat_totals = prov_cat.groupby("categoría")["monto"].sum().reset_index()
     cat_totals.columns = ["categoría", "monto_cat_total"]
     prov_cat_pct = prov_cat.merge(cat_totals, on="categoría")
