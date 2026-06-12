@@ -437,37 +437,11 @@ with tab_home:
     _monto_home = proc_dedup[monto_col(anual_home)].fillna(0)
     _total_home = _monto_home.sum()
 
-    col_kpi, col_donut = st.columns([2, 3])
-
-    with col_kpi:
-        k1, k2 = st.columns(2)
-        k1.metric("Procedimientos", f"{n_procs:,}")
-        k2.metric(monto_label(anual_home), fmt_crc(_total_home))
-        k3, k4 = st.columns(2)
-        k3.metric("Proveedores", f"{n_prov:,}")
-        k4.metric("Desiertos", f"{n_desierto:,}")
-
-    with col_donut:
-        _mc_home = monto_col(anual_home)
-        cat_donut = (
-            proc_dedup.groupby("categoría")[_mc_home]
-            .sum().reset_index()
-            .sort_values(_mc_home, ascending=False)
-        )
-        cat_donut.columns = ["Categoría", "Monto"]
-        fig_donut = px.pie(
-            cat_donut, names="Categoría", values="Monto",
-            title="Distribución del Gasto por Categoría",
-            hole=0.45,
-        )
-        fig_donut.update_layout(
-            height=500,
-            margin=dict(t=40, b=10, l=10, r=10),
-            legend=dict(font=dict(size=10), orientation="h", yanchor="top", y=-0.05),
-        )
-        fig_donut.update_traces(textposition="inside", textinfo="percent",
-                                textfont_size=9)
-        st.plotly_chart(fig_donut, use_container_width=True)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Procedimientos", f"{n_procs:,}")
+    k2.metric(monto_label(anual_home), fmt_crc(_total_home))
+    k3.metric("Proveedores", f"{n_prov:,}")
+    k4.metric("Desiertos", f"{n_desierto:,}")
 
     st.markdown("---")
 
