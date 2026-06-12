@@ -27,7 +27,7 @@ st.markdown("""
     }
     button[data-baseweb="tab"] {
         padding: 0.6rem 1.2rem !important;
-        color: #1a1a2e !important;
+        color: #fafafa !important;
     }
     button[data-baseweb="tab"][aria-selected="true"] {
         color: #0068c9 !important;
@@ -331,32 +331,20 @@ enriched, op_con, op_raw = prepare_data(tables)
 # year filter
 valid_dates = enriched["fecha_adj"].dropna()
 if len(valid_dates):
-    all_years = sorted(valid_dates.dt.year.unique())
+    all_years = sorted(y for y in valid_dates.dt.year.unique() if y >= 2021)
     sel_years = st.sidebar.multiselect("Año(s)", all_years, default=all_years)
 else:
     sel_years = []
-
-# tipo procedimiento
-tipos = sorted(enriched["tipo procedimiento"].dropna().unique())
-sel_tipos = st.sidebar.multiselect("Tipo de Procedimiento", tipos,
-                                    placeholder="Todos")
-
-# proveedor filter
-all_proveedores = sorted(
-    enriched["proveedores"].dropna()
-    .str.split(r"\s*\|\s*").explode().str.strip()
-    .loc[lambda s: s != ""].unique()
-)
-sel_proveedores = st.sidebar.multiselect("Proveedor(es)", all_proveedores,
-                                          placeholder="Todos")
 
 # categoría filter
 categorias = sorted(enriched["categoría"].dropna().unique())
 sel_categorias = st.sidebar.multiselect("Categoría de Producto", categorias,
                                          placeholder="Todos")
 
-# desierto
-estado_opt = st.sidebar.radio("Estado", ["Todos", "Solo adjudicados", "Solo desiertos"])
+# tipo procedimiento
+tipos = sorted(enriched["tipo procedimiento"].dropna().unique())
+sel_tipos = st.sidebar.multiselect("Tipo de Procedimiento", tipos,
+                                    placeholder="Todos")
 
 # ── apply filters ──
 df = enriched.copy()
@@ -367,26 +355,12 @@ if sel_years:
 if sel_tipos:
     df = df[df["tipo procedimiento"].isin(sel_tipos) | df["tipo procedimiento"].isna()]
 
-if sel_proveedores:
-    mask = df["proveedores"].fillna("").apply(
-        lambda p: any(s.strip() in p for s in sel_proveedores)
-    )
-    df = df[mask]
-
 if sel_categorias:
     df = df[df["categoría"].isin(sel_categorias) | df["categoría"].isna()]
-
-if estado_opt == "Solo adjudicados":
-    df = df[df["desierto"].str.upper() == "N"]
-elif estado_opt == "Solo desiertos":
-    df = df[df["desierto"].str.upper() == "S"]
 
 # filter op_con to match filtered procedures (all visualizations use this)
 filtered_procs = set(df["número de procedimiento"].dropna().unique())
 op_filtered = op_con[op_con["número procedimiento"].isin(filtered_procs)]
-
-if sel_proveedores:
-    op_filtered = op_filtered[op_filtered["nombre proveedor"].isin(sel_proveedores)]
 
 # add category to op_filtered via procedure mapping
 proc_cat = df.drop_duplicates("número de procedimiento")[["número de procedimiento", "categoría"]]
@@ -447,8 +421,9 @@ prov_rank["nombre proveedor"] = prov_rank["nombre proveedor"].fillna(
 st.title(f"🏛️ Observador de Gasto Público (SICOP) — {inst_label}")
 st.caption(f"**{n_procs:,}** procedimientos · {len(df):,} registros de adjudicación")
 
-tab_home, tab_gasto, tab_anomalias, tab_oferentes, tab_glosario = st.tabs(
-    ["🏠 Inicio", "💰 Gasto", "🚨 Anomalías", "🔎 Oferentes", "📖 Glosario"]
+tab_home, tab_gasto, tab_anomalias, tab_oferentes, tab_legal, tab_glosario = st.tabs(
+    ["🏠 Inicio", "💰 Gasto", "🚨 Anomalías", "🔎 Oferentes",
+     "⚖️ Correlaciones Legales", "📖 Glosario"]
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -457,10 +432,42 @@ tab_home, tab_gasto, tab_anomalias, tab_oferentes, tab_glosario = st.tabs(
 
 with tab_home:
     st.header("Bienvenido al Observador de Gasto Público (SICOP)")
-    st.markdown(f"""
-    Plataforma de análisis del gasto público adjudicado a través del sistema
-    **SICOP** (Sistema Integrado de Compras Públicas) de Costa Rica.
 
+    anual_home = st.toggle("Mostrar montos anualizados", value=False, key="anual_home")
+    _monto_home = proc_dedup[monto_col(anual_home)].fillna(0)
+    _total_home = _monto_home.sum()
+
+    col_kpi, col_donut = st.columns([2, 3])
+
+    with col_kpi:
+        k1, k2 = st.columns(2)
+        k1.metric("Procedimientos", f"{n_procs:,}")
+        k2.metric(monto_label(anual_home), fmt_crc(_total_home))
+        k3, k4 = st.columns(2)
+        k3.metric("Proveedores", f"{n_prov:,}")
+        k4.metric("Desiertos", f"{n_desierto:,}")
+
+    with col_donut:
+        _mc_home = monto_col(anual_home)
+        cat_donut = (
+            proc_dedup.groupby("categoría")[_mc_home]
+            .sum().reset_index()
+            .sort_values(_mc_home, ascending=False)
+        )
+        cat_donut.columns = ["Categoría", "Monto"]
+        fig_donut = px.pie(
+            cat_donut, names="Categoría", values="Monto",
+            title="Distribución del Gasto por Categoría",
+            hole=0.45,
+        )
+        fig_donut.update_layout(height=350, margin=dict(t=40, b=10, l=10, r=10))
+        fig_donut.update_traces(textposition="inside", textinfo="percent+label",
+                                textfont_size=10)
+        st.plotly_chart(fig_donut, use_container_width=True)
+
+    st.markdown("---")
+
+    st.markdown(f"""
     ### 🚀 Para comenzar
     Utilice los filtros de la **barra lateral izquierda** para acotar los datos:
     1. **Institución** — seleccione la entidad pública a analizar
@@ -473,18 +480,6 @@ with tab_home:
 
     > Actualmente visualizando: **{inst_label}**
     """)
-
-    st.markdown("---")
-
-    anual_home = st.toggle("Mostrar montos anualizados", value=False, key="anual_home")
-    _monto_home = proc_dedup[monto_col(anual_home)].fillna(0)
-    _total_home = _monto_home.sum()
-
-    col_h1, col_h2, col_h3, col_h4 = st.columns(4)
-    col_h1.metric("Procedimientos", f"{n_procs:,}")
-    col_h2.metric(monto_label(anual_home), fmt_crc(_total_home))
-    col_h3.metric("Proveedores", f"{n_prov:,}")
-    col_h4.metric("Desiertos", f"{n_desierto:,}")
 
     st.markdown("---")
 
@@ -575,31 +570,6 @@ with tab_gasto:
 
     st.markdown("---")
 
-    # ── TIPO / MODALIDAD ──
-    st.subheader("📋 Distribución por Tipo de Procedimiento")
-    st.caption("Composición del gasto según el tipo de contratación")
-    anual_tipo = st.toggle("Mostrar montos anualizados", value=False, key="anual_tipo")
-    _mc_tp = monto_col(anual_tipo)
-    _ml_tp = monto_label(anual_tipo)
-
-    tipo_data = (
-        proc_summary.groupby("tipo procedimiento")
-        .agg(monto=(_mc_tp, "sum"), n=(_mc_tp, "count"))
-        .reset_index().sort_values("monto", ascending=False)
-    )
-    col_tipo_chart, col_tipo_table = st.columns([3, 2])
-    with col_tipo_chart:
-        fig_t = px.pie(tipo_data, names="tipo procedimiento", values="monto",
-                       title="Monto por Tipo de Procedimiento")
-        st.plotly_chart(fig_t, use_container_width=True)
-    with col_tipo_table:
-        tipo_tbl = tipo_data.copy()
-        tipo_tbl.columns = ["Tipo Procedimiento", _ml_tp, "Cantidad"]
-        tipo_tbl[_ml_tp] = tipo_tbl[_ml_tp].apply(fmt_crc)
-        st.dataframe(tipo_tbl, width="stretch", hide_index=True)
-
-    st.markdown("---")
-
     # ── CATEGORÍA ──
     st.subheader("🏷️ Distribución por Categoría de Producto")
     st.caption("Clasificación automática del gasto por categoría de bien o servicio")
@@ -640,6 +610,31 @@ with tab_gasto:
         csv_cat = cat_data.to_csv(index=False).encode("utf-8")
         st.download_button("📥 Descargar categorías (CSV)", csv_cat,
                            "categorias_producto.csv", "text/csv")
+
+    st.markdown("---")
+
+    # ── TIPO / MODALIDAD ──
+    st.subheader("📋 Distribución por Tipo de Procedimiento")
+    st.caption("Composición del gasto según el tipo de contratación")
+    anual_tipo = st.toggle("Mostrar montos anualizados", value=False, key="anual_tipo")
+    _mc_tp = monto_col(anual_tipo)
+    _ml_tp = monto_label(anual_tipo)
+
+    tipo_data = (
+        proc_summary.groupby("tipo procedimiento")
+        .agg(monto=(_mc_tp, "sum"), n=(_mc_tp, "count"))
+        .reset_index().sort_values("monto", ascending=False)
+    )
+    col_tipo_chart, col_tipo_table = st.columns([3, 2])
+    with col_tipo_chart:
+        fig_t = px.pie(tipo_data, names="tipo procedimiento", values="monto",
+                       title="Monto por Tipo de Procedimiento")
+        st.plotly_chart(fig_t, use_container_width=True)
+    with col_tipo_table:
+        tipo_tbl = tipo_data.copy()
+        tipo_tbl.columns = ["Tipo Procedimiento", _ml_tp, "Cantidad"]
+        tipo_tbl[_ml_tp] = tipo_tbl[_ml_tp].apply(fmt_crc)
+        st.dataframe(tipo_tbl, width="stretch", hide_index=True)
 
     st.markdown("---")
 
@@ -1518,6 +1513,286 @@ with tab_oferentes:
     csv_ofer = prov_agg.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Descargar oferentes (CSV)", csv_ofer,
                        "oferentes_completo.csv", "text/csv")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB: CORRELACIONES LEGALES
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab_legal:
+
+    st.header("⚖️ Correlaciones Legales de Auditoría")
+    st.markdown("""
+    Análisis cruzado de **leyes**, **casos judiciales** y **hallazgos de auditoría**
+    de la Contraloría General de la República. Las correlaciones se calculan
+    automáticamente a partir de leyes citadas y coincidencias institucionales.
+    """)
+
+    # ── Load CSV data ──
+    @st.cache_data(ttl=3600)
+    def _load_legal_data():
+        laws = pd.read_csv(DATA_DIR / "sinalevi_sample.csv", sep=";")
+        cases = pd.read_csv(DATA_DIR / "nexus_sample.csv", sep=";")
+        audit = pd.read_csv(DATA_DIR / "contraloria_sample.csv", sep=";")
+        return laws, cases, audit
+
+    @st.cache_data(ttl=3600)
+    def _compute_correlations(_laws, _cases, _audit):
+        correlations = []
+        corr_id = 0
+
+        # 1. Audit → Law (laws cited in audit findings)
+        for _, finding in _audit.iterrows():
+            cited = str(finding.get("leyes_citadas", ""))
+            if not cited or cited == "nan":
+                continue
+            for _, law in _laws.iterrows():
+                law_num = str(law.get("numero_ley", ""))
+                if law_num and law_num in cited:
+                    corr_id += 1
+                    correlations.append({
+                        "id": corr_id,
+                        "Fuente A": "Hallazgo CGR",
+                        "ID A": finding.get("numero_informe", ""),
+                        "Título A": str(finding.get("titulo_hallazgo", ""))[:60],
+                        "Fuente B": "Ley",
+                        "ID B": law_num,
+                        "Título B": str(law.get("titulo", ""))[:60],
+                        "Tipo": "Cita Legal en Hallazgo",
+                        "Confianza": 0.95,
+                        "Método": "rule_based",
+                        "Evidencia": f"Hallazgo cita {law_num}",
+                    })
+
+        # 2. Case → Law (laws cited in judicial cases)
+        for _, case in _cases.iterrows():
+            cited = str(case.get("leyes_citadas", ""))
+            if not cited or cited == "nan":
+                continue
+            for _, law in _laws.iterrows():
+                law_num = str(law.get("numero_ley", ""))
+                if law_num and law_num in cited:
+                    corr_id += 1
+                    correlations.append({
+                        "id": corr_id,
+                        "Fuente A": "Caso Judicial",
+                        "ID A": case.get("numero_expediente", ""),
+                        "Título A": str(case.get("materia", ""))[:60],
+                        "Fuente B": "Ley",
+                        "ID B": law_num,
+                        "Título B": str(law.get("titulo", ""))[:60],
+                        "Tipo": "Cita Legal en Caso",
+                        "Confianza": 0.95,
+                        "Método": "rule_based",
+                        "Evidencia": f"Caso cita {law_num}",
+                    })
+
+        # 3. Audit ↔ Case (same institution)
+        for _, finding in _audit.iterrows():
+            inst_a = str(finding.get("cedula_institucion", ""))
+            if not inst_a or inst_a == "nan":
+                continue
+            for _, case in _cases.iterrows():
+                inst_b = str(case.get("cedula_institucion", ""))
+                if inst_a == inst_b:
+                    corr_id += 1
+                    correlations.append({
+                        "id": corr_id,
+                        "Fuente A": "Hallazgo CGR",
+                        "ID A": finding.get("numero_informe", ""),
+                        "Título A": str(finding.get("titulo_hallazgo", ""))[:60],
+                        "Fuente B": "Caso Judicial",
+                        "ID B": case.get("numero_expediente", ""),
+                        "Título B": str(case.get("materia", ""))[:60],
+                        "Tipo": "Misma Institución",
+                        "Confianza": 0.70,
+                        "Método": "rule_based",
+                        "Evidencia": f"Institución: {finding.get('nombre_institucion', '')}",
+                    })
+
+        return pd.DataFrame(correlations) if correlations else pd.DataFrame()
+
+    laws_df, cases_df, audit_df = _load_legal_data()
+    corr_df = _compute_correlations(laws_df, cases_df, audit_df)
+
+    # ── KPIs ──
+    kl1, kl2, kl3, kl4 = st.columns(4)
+    kl1.metric("📜 Leyes", len(laws_df))
+    kl2.metric("⚖️ Casos Judiciales", len(cases_df))
+    kl3.metric("🔍 Hallazgos CGR", len(audit_df))
+    kl4.metric("🔗 Correlaciones", len(corr_df))
+
+    st.markdown("---")
+
+    sub_laws, sub_cases, sub_audit, sub_corr = st.tabs([
+        "📜 Leyes (SINALEVI)", "⚖️ Casos (Nexus)",
+        "🔍 Hallazgos (Contraloría)", "🔗 Correlaciones"
+    ])
+
+    # ── Sub-tab: Leyes ──
+    with sub_laws:
+        st.subheader("📜 Marco Legal — SINALEVI")
+        laws_disp = laws_df[["numero_ley", "titulo", "tipo", "organo_emisor",
+                              "fecha_publicacion", "estado", "materia"]].copy()
+        laws_disp.columns = ["Número", "Título", "Tipo", "Órgano Emisor",
+                              "Fecha Publicación", "Estado", "Materia"]
+        st.dataframe(laws_disp, use_container_width=True, hide_index=True)
+
+        sel_law = st.selectbox(
+            "Ver detalle de ley:",
+            [f"{r['numero_ley']} — {r['titulo']}" for _, r in laws_df.iterrows()],
+            key="legal_law_sel",
+        )
+        if sel_law:
+            law_num = sel_law.split(" — ")[0]
+            d = laws_df[laws_df["numero_ley"] == law_num].iloc[0]
+            col1, col2 = st.columns(2)
+            col1.markdown(f"**Número:** {d.get('numero_ley', '—')}")
+            col1.markdown(f"**Tipo:** {d.get('tipo', '—')}")
+            col1.markdown(f"**Estado:** {d.get('estado', '—')}")
+            col2.markdown(f"**Órgano emisor:** {d.get('organo_emisor', '—')}")
+            col2.markdown(f"**Fecha publicación:** {d.get('fecha_publicacion', '—')}")
+            col2.markdown(f"**Materia:** {d.get('materia', '—')}")
+            if pd.notna(d.get("resumen")):
+                st.markdown(f"**Resumen:** {d['resumen']}")
+            if pd.notna(d.get("etiquetas")):
+                st.markdown(f"**Etiquetas:** {d['etiquetas']}")
+
+    # ── Sub-tab: Casos ──
+    with sub_cases:
+        st.subheader("⚖️ Casos Judiciales — Nexus")
+        cases_disp = cases_df[["numero_expediente", "tribunal", "jurisdiccion",
+                                "tipo_caso", "nombre_institucion", "estado",
+                                "fecha_interposicion"]].copy()
+        cases_disp.columns = ["Expediente", "Tribunal", "Jurisdicción", "Tipo",
+                               "Institución", "Estado", "Fecha"]
+        st.dataframe(cases_disp, use_container_width=True, hide_index=True)
+
+        sel_case = st.selectbox(
+            "Ver detalle de caso:",
+            cases_df["numero_expediente"].tolist(),
+            key="legal_case_sel",
+        )
+        if sel_case:
+            d = cases_df[cases_df["numero_expediente"] == sel_case].iloc[0]
+            col1, col2 = st.columns(2)
+            col1.markdown(f"**Expediente:** {d.get('numero_expediente', '—')}")
+            col1.markdown(f"**Tribunal:** {d.get('tribunal', '—')}")
+            col1.markdown(f"**Jurisdicción:** {d.get('jurisdiccion', '—')}")
+            col1.markdown(f"**Estado:** {d.get('estado', '—')}")
+            col2.markdown(f"**Demandante:** {d.get('demandante', '—')}")
+            col2.markdown(f"**Demandado:** {d.get('demandado', '—')}")
+            monto = d.get("monto_disputado", 0)
+            col2.markdown(f"**Monto disputado:** ₡{monto:,.0f}" if pd.notna(monto) and monto > 0 else "**Monto:** —")
+            col2.markdown(f"**Institución:** {d.get('nombre_institucion', '—')}")
+            if pd.notna(d.get("materia")):
+                st.markdown(f"**Materia:** {d['materia']}")
+            if pd.notna(d.get("resumen_resolucion")):
+                st.markdown(f"**Resolución:** {d['resumen_resolucion']}")
+            if pd.notna(d.get("leyes_citadas")):
+                st.markdown(f"**Leyes citadas:** {d['leyes_citadas']}")
+
+    # ── Sub-tab: Hallazgos ──
+    with sub_audit:
+        st.subheader("🔍 Hallazgos de Auditoría — Contraloría")
+        audit_disp = audit_df[["numero_informe", "titulo_hallazgo", "tipo_auditoria",
+                                "area_auditoria", "severidad", "nombre_institucion",
+                                "fecha_informe", "estado_disposicion", "monto_observado"]].copy()
+        audit_disp.columns = ["Informe", "Hallazgo", "Tipo", "Área", "Severidad",
+                               "Institución", "Fecha", "Estado Disposición", "Monto Observado"]
+        audit_disp["Monto Observado"] = audit_disp["Monto Observado"].apply(
+            lambda v: fmt_crc(v) if pd.notna(v) and v > 0 else "—"
+        )
+
+        severities = sorted(audit_df["severidad"].dropna().unique())
+        sel_sev = st.multiselect("Filtrar por severidad:", severities,
+                                  default=severities, key="legal_sev_filter")
+        filtered_audit = audit_disp[audit_disp["Severidad"].isin(sel_sev)]
+        st.dataframe(filtered_audit, use_container_width=True, hide_index=True)
+
+        if len(filtered_audit) > 0:
+            sev_counts = filtered_audit["Severidad"].value_counts()
+            st.bar_chart(sev_counts)
+
+        sel_finding = st.selectbox(
+            "Ver detalle:",
+            [f"{r['numero_informe']} — {r['titulo_hallazgo']}" for _, r in
+             audit_df[audit_df["severidad"].isin(sel_sev)].iterrows()],
+            key="legal_audit_sel",
+        )
+        if sel_finding:
+            report_num = sel_finding.split(" — ")[0]
+            title = sel_finding.split(" — ", 1)[1]
+            match = audit_df[(audit_df["numero_informe"] == report_num) &
+                             (audit_df["titulo_hallazgo"] == title)]
+            if len(match) > 0:
+                d = match.iloc[0]
+                col1, col2 = st.columns(2)
+                col1.markdown(f"**Informe:** {d.get('numero_informe', '—')}")
+                col1.markdown(f"**Severidad:** {d.get('severidad', '—')}")
+                col1.markdown(f"**Estado disposición:** {d.get('estado_disposicion', '—')}")
+                col2.markdown(f"**Institución:** {d.get('nombre_institucion', '—')}")
+                col2.markdown(f"**Área:** {d.get('area_auditoria', '—')}")
+                monto = d.get("monto_observado", 0)
+                col2.markdown(f"**Monto observado:** ₡{monto:,.0f}" if pd.notna(monto) and monto > 0 else "**Monto:** —")
+                if pd.notna(d.get("descripcion_hallazgo")):
+                    st.markdown(f"**Descripción:** {d['descripcion_hallazgo']}")
+                if pd.notna(d.get("recomendacion")):
+                    st.info(f"**Recomendación:** {d['recomendacion']}")
+                if pd.notna(d.get("leyes_citadas")):
+                    st.markdown(f"**Leyes citadas:** {d['leyes_citadas']}")
+
+    # ── Sub-tab: Correlaciones ──
+    with sub_corr:
+        st.subheader("🔗 Red de Correlaciones")
+
+        if len(corr_df) > 0:
+            # Summary metrics
+            type_counts = corr_df["Tipo"].value_counts()
+            cols_metric = st.columns(len(type_counts))
+            for i, (t, cnt) in enumerate(type_counts.items()):
+                cols_metric[i].metric(t, cnt)
+
+            # Filter by type
+            sel_corr_type = st.multiselect(
+                "Filtrar por tipo:", type_counts.index.tolist(),
+                default=type_counts.index.tolist(), key="legal_corr_type",
+            )
+            filtered_corr = corr_df[corr_df["Tipo"].isin(sel_corr_type)]
+            st.dataframe(
+                filtered_corr[["Fuente A", "ID A", "Título A",
+                                "Fuente B", "ID B", "Título B",
+                                "Tipo", "Confianza", "Evidencia"]],
+                use_container_width=True, hide_index=True,
+            )
+
+            # Visual network
+            st.subheader("Mapa de Correlaciones")
+            for _, row in filtered_corr.iterrows():
+                conf = row["Confianza"]
+                emoji = "🟢" if conf >= 0.9 else "🟡" if conf >= 0.6 else "🔴"
+                st.markdown(
+                    f"{emoji} **{row['Fuente A']}** `{row['Título A']}` "
+                    f"↔ **{row['Fuente B']}** `{row['Título B']}` "
+                    f"— _{row['Tipo']}_ ({conf:.0%})"
+                )
+
+            # Law citation frequency
+            st.markdown("---")
+            st.subheader("📊 Leyes más citadas")
+            law_cites = corr_df[corr_df["Fuente B"] == "Ley"]["ID B"].value_counts()
+            if len(law_cites) > 0:
+                cite_df = law_cites.reset_index()
+                cite_df.columns = ["Ley", "Citas"]
+                fig_cite = px.bar(
+                    cite_df, x="Ley", y="Citas",
+                    title="Frecuencia de Citas por Ley",
+                    color="Citas", color_continuous_scale="Reds",
+                )
+                fig_cite.update_layout(height=400, coloraxis_showscale=False)
+                st.plotly_chart(fig_cite, use_container_width=True)
+        else:
+            st.info("No se encontraron correlaciones.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
