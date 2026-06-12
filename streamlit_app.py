@@ -460,9 +460,13 @@ with tab_home:
             title="Distribución del Gasto por Categoría",
             hole=0.45,
         )
-        fig_donut.update_layout(height=350, margin=dict(t=40, b=10, l=10, r=10))
-        fig_donut.update_traces(textposition="inside", textinfo="percent+label",
-                                textfont_size=10)
+        fig_donut.update_layout(
+            height=500,
+            margin=dict(t=40, b=10, l=10, r=10),
+            legend=dict(font=dict(size=10), orientation="h", yanchor="top", y=-0.05),
+        )
+        fig_donut.update_traces(textposition="inside", textinfo="percent",
+                                textfont_size=9)
         st.plotly_chart(fig_donut, use_container_width=True)
 
     st.markdown("---")
